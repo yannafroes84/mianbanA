@@ -1385,6 +1385,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         // 闂傚倸鍊搁崐鐑芥嚄閸洖纾婚柟鎯х－閺嗭附鎱ㄥ璇蹭壕闂佽鍨伴惌鍌氱暦濠婂棭妲鹃柣蹇撶箳閺佸骞冭ぐ鎺戠倞妞ゅ繐瀚В銏ゆ⒑闁偛鑻晶浼存煕韫囨棑鑰挎鐐叉瀹曠喖顢橀悩鐢靛幆闂備礁澹婇悡鍫ュ窗閺嶎偆绀婃慨妞诲亾闁哄矉绲鹃幆鏃堝閳垛晛顫屾俊鐐€戦崝灞轿涘┑瀣ㄢ偓?
         private Integer fromChainType; // 1: 1, 2, 3
+        private Integer fromInx;
         private Integer toChainType;
         private Integer toInx;
     }
