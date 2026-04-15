@@ -129,7 +129,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         ViteConfig viteConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "ip"));
         if (viteConfig == null) return R.err("请先前往网站配置中设置ip");
         StringBuilder command = new StringBuilder();
-        command.append("curl -L https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh")
+        command.append("curl -L \"https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)\"")
                 .append(" -o ./install.sh && chmod +x ./install.sh && ");
         String processedServerAddr = GostUtil.processServerAddress(viteConfig.getValue());
         command.append("./install.sh")

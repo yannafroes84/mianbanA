@@ -222,15 +222,13 @@ download_flux_agent_binary() {
   local url
 
   append_candidate_url download_urls "$RAW_DOWNLOAD_URL"
-  if assert_release_asset_exists "$RAW_DOWNLOAD_URL" "$asset_name"; then
-    for url in "${download_urls[@]}"; do
-      echo "Download URL: $url"
-      if download_release_asset "$url" "$output_path" "$asset_name"; then
-        chmod +x "$output_path"
-        return 0
-      fi
-    done
-  fi
+  for url in "${download_urls[@]}"; do
+    echo "Download URL: $url"
+    if download_release_asset "$url" "$output_path" "$asset_name"; then
+      chmod +x "$output_path"
+      return 0
+    fi
+  done
 
   if ! build_flux_agent_from_source "$output_path"; then
     return 1
