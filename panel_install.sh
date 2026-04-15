@@ -10,6 +10,7 @@ RELEASE_TAG="${RELEASE_TAG:-latest}"
 EXPLICIT_APP_VERSION="${APP_VERSION:-}"
 EXPLICIT_BACKEND_IMAGE="${BACKEND_IMAGE:-}"
 EXPLICIT_FRONTEND_IMAGE="${FRONTEND_IMAGE:-}"
+PREFER_SOURCE_BUILD="${PREFER_SOURCE_BUILD:-1}"
 IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-ghcr.io/$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')}"
 IMAGE_BASENAME="${IMAGE_BASENAME:-$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')}"
 BACKEND_IMAGE="${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}"
@@ -191,6 +192,12 @@ build_panel_images_from_source() {
 
 ensure_panel_images() {
   echo "Preparing panel images..."
+  if [[ "$PREFER_SOURCE_BUILD" == "1" ]]; then
+    echo "Prefer source build is enabled, building local images from current source..."
+    build_panel_images_from_source
+    return 0
+  fi
+
   if docker pull "${BACKEND_IMAGE}:${APP_VERSION}" && docker pull "${FRONTEND_IMAGE}:${APP_VERSION}"; then
     return 0
   fi
