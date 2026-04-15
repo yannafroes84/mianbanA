@@ -26,7 +26,7 @@ get_source_ref() {
 
 build_raw_file_url() {
   local file_name="$1"
-  echo "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/$(get_source_ref)/${file_name}"
+  echo "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/$(get_source_ref)/${file_name}?ts=$(date +%s)"
 }
 
 get_source_page_url() {
@@ -43,14 +43,18 @@ get_source_archive_url() {
 
 RAW_DOCKER_COMPOSEV4_URL="$(build_raw_file_url "docker-compose-v4.yml")"
 RAW_DOCKER_COMPOSEV6_URL="$(build_raw_file_url "docker-compose-v6.yml")"
-DOCKER_COMPOSEV4_URL="$RAW_DOCKER_COMPOSEV4_URL"
-DOCKER_COMPOSEV6_URL="$RAW_DOCKER_COMPOSEV6_URL"
-
 COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
-if [[ "$COUNTRY" == "CN" ]]; then
-  DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
-  DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
-fi
+
+append_candidate_url() {
+  local -n target_array="$1"
+  local raw_url="$2"
+  if [[ "$COUNTRY" == "CN" ]]; then
+    target_array+=("https://ghfast.top/${raw_url}")
+    target_array+=("$raw_url")
+  else
+    target_array+=("$raw_url")
+  fi
+}
 
 print_compose_source_error() {
   local asset_name="$1"
@@ -92,11 +96,7 @@ get_compose_asset_name() {
 }
 
 get_docker_compose_url() {
-  if has_ipv6_support; then
-    echo "$DOCKER_COMPOSEV6_URL"
-  else
-    echo "$DOCKER_COMPOSEV4_URL"
-  fi
+  get_raw_docker_compose_url
 }
 
 get_raw_docker_compose_url() {
@@ -108,25 +108,25 @@ get_raw_docker_compose_url() {
 }
 
 download_compose_file() {
-  local asset_name raw_url download_url
+  local asset_name raw_url download_urls url
   asset_name="$(get_compose_asset_name)"
   raw_url="$(get_raw_docker_compose_url)"
-  download_url="$(get_docker_compose_url)"
+  download_urls=()
+  append_candidate_url download_urls "$raw_url"
 
   echo "Using compose asset: ${asset_name}"
-  if ! curl -fsLI --connect-timeout 15 "$raw_url" >/dev/null 2>&1; then
-    print_compose_source_error "$asset_name"
-    return 1
-  fi
-
   rm -f docker-compose.yml
-  if ! curl -fL --retry 3 --connect-timeout 15 -o docker-compose.yml "$download_url"; then
-    print_compose_source_error "$asset_name"
-    return 1
-  fi
+  for url in "${download_urls[@]}"; do
+    echo "Compose URL: $url"
+    if curl -fL --retry 2 --connect-timeout 15 --max-time 120 -o docker-compose.yml "$url"; then
+      break
+    fi
+    rm -f docker-compose.yml
+  done
 
   if [[ ! -s docker-compose.yml ]]; then
     echo "Error: downloaded docker-compose.yml is empty"
+    print_compose_source_error "$asset_name"
     return 1
   fi
 
@@ -156,15 +156,22 @@ check_docker() {
 }
 
 build_panel_images_from_source() {
-  local temp_dir archive_url source_dir
+  local temp_dir archive_url source_dir archive_urls url
   temp_dir="$(mktemp -d)"
   archive_url="$(get_source_archive_url)"
-  if [[ "$COUNTRY" == "CN" ]]; then
-    archive_url="https://ghfast.top/${archive_url}"
-  fi
+  archive_urls=()
+  append_candidate_url archive_urls "$archive_url"
 
   echo "Building panel images from source..."
-  if ! curl -fL --retry 3 --connect-timeout 15 "$archive_url" -o "$temp_dir/repo.tar.gz"; then
+  for url in "${archive_urls[@]}"; do
+    echo "Source URL: $url"
+    if curl -fL --retry 2 --connect-timeout 15 --max-time 180 "$url" -o "$temp_dir/repo.tar.gz"; then
+      break
+    fi
+    rm -f "$temp_dir/repo.tar.gz"
+  done
+
+  if [[ ! -s "$temp_dir/repo.tar.gz" ]]; then
     echo "Error: failed to download repository source"
     rm -rf "$temp_dir"
     return 1
