@@ -3,6 +3,12 @@ package com.admin.controller;
 import com.admin.common.aop.LogAnnotation;
 import com.admin.common.annotation.RequireRole;
 import com.admin.common.dto.ForwardDto;
+import com.admin.common.dto.ForwardBatchDeleteDto;
+import com.admin.common.dto.ForwardBatchGroupDto;
+import com.admin.common.dto.ForwardGroupCreateDto;
+import com.admin.common.dto.ForwardGroupDeleteDto;
+import com.admin.common.dto.ForwardGroupUpdateDto;
+import com.admin.common.dto.ForwardQueryDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.service.ForwardService;
@@ -36,8 +42,8 @@ public class ForwardController extends BaseController {
 
     @LogAnnotation
     @PostMapping("/list")
-    public R readAll() {
-        return forwardService.getAllForwards();
+    public R readAll(@RequestBody(required = false) ForwardQueryDto queryDto) {
+        return forwardService.getAllForwards(queryDto);
     }
 
     @LogAnnotation
@@ -99,10 +105,32 @@ public class ForwardController extends BaseController {
 
     @LogAnnotation
     @PostMapping("/update-group")
-    public R updateForwardGroup(@RequestBody Map<String, Object> params) {
-        Long id = Long.valueOf(params.get("id").toString());
-        String groupName = params.get("groupName") != null ? params.get("groupName").toString() : "";
-        return forwardService.updateForwardGroup(id, groupName);
+    public R updateForwardGroup(@Validated @RequestBody ForwardGroupUpdateDto forwardGroupUpdateDto) {
+        return forwardService.updateForwardGroup(forwardGroupUpdateDto);
+    }
+
+    @LogAnnotation
+    @PostMapping("/batch-update-group")
+    public R batchUpdateForwardGroup(@Validated @RequestBody ForwardBatchGroupDto batchGroupDto) {
+        return forwardService.batchUpdateForwardGroup(batchGroupDto);
+    }
+
+    @LogAnnotation
+    @PostMapping("/batch-delete")
+    public R batchDeleteForward(@Validated @RequestBody ForwardBatchDeleteDto batchDeleteDto) {
+        return forwardService.batchDeleteForward(batchDeleteDto);
+    }
+
+    @LogAnnotation
+    @PostMapping("/group/create")
+    public R createForwardGroup(@Validated @RequestBody ForwardGroupCreateDto createDto) {
+        return forwardService.createForwardGroup(createDto);
+    }
+
+    @LogAnnotation
+    @PostMapping("/group/delete")
+    public R deleteForwardGroup(@Validated @RequestBody ForwardGroupDeleteDto deleteDto) {
+        return forwardService.deleteForwardGroup(deleteDto.getId());
     }
 
     @LogAnnotation

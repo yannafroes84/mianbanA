@@ -6,6 +6,7 @@ import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
+import com.admin.mapper.ForwardGroupMapper;
 import com.admin.mapper.ForwardMapper;
 import com.admin.service.*;
 import com.alibaba.fastjson.JSONArray;
@@ -60,18 +61,28 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     @Resource
     ForwardPortService forwardPortService;
 
-    @Override
-    public R getAllForwards() {
-        UserInfo currentUser = getCurrentUserInfo();
-        List<ForwardWithTunnelDto> forwardList;
-        if (currentUser.getRoleId() != 0) {
-            forwardList = baseMapper.selectForwardsWithTunnelByUserId(currentUser.getUserId());
-        } else {
-            forwardList = baseMapper.selectAllForwardsWithTunnel();
-        }
+    @Resource
+    ForwardGroupMapper forwardGroupMapper;
 
-        if (forwardList.isEmpty()) {
-            return R.ok(forwardList);
+    @Override
+    public R getAllForwards(ForwardQueryDto queryDto) {
+        UserInfo currentUser = getCurrentUserInfo();
+        List<ForwardWithTunnelDto> forwardList = loadVisibleForwards(currentUser);
+        enrichForwardAddresses(forwardList);
+        List<ForwardWithTunnelDto> filteredList = filterForwards(forwardList, queryDto);
+        return R.ok(filteredList);
+    }
+
+    private List<ForwardWithTunnelDto> loadVisibleForwards(UserInfo currentUser) {
+        if (currentUser.getRoleId() != 0) {
+            return baseMapper.selectForwardsWithTunnelByUserId(currentUser.getUserId());
+        }
+        return baseMapper.selectAllForwardsWithTunnel();
+    }
+
+    private void enrichForwardAddresses(List<ForwardWithTunnelDto> forwardList) {
+        if (forwardList == null || forwardList.isEmpty()) {
+            return;
         }
 
         List<Long> tunnelIds = forwardList.stream()
@@ -100,13 +111,16 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         for (ForwardWithTunnelDto forward : forwardList) {
             Tunnel tunnel = tunnelMap.get(forward.getTunnelId());
-            if (tunnel == null) continue;
+            if (tunnel == null) {
+                continue;
+            }
 
             List<ForwardPort> forwardPorts = forwardPortMap.getOrDefault(forward.getId(), Collections.emptyList());
-            if (forwardPorts.isEmpty()) continue;
+            if (forwardPorts.isEmpty()) {
+                continue;
+            }
 
             boolean useTunnelInIp = tunnel.getInIp() != null && !tunnel.getInIp().trim().isEmpty();
-
             Set<String> ipPortSet = new LinkedHashSet<>();
 
             if (useTunnelInIp) {
@@ -155,8 +169,23 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                 forward.setInIp(String.join(",", ipPortSet));
             }
         }
+    }
 
-        return R.ok(forwardList);
+    private List<ForwardWithTunnelDto> filterForwards(List<ForwardWithTunnelDto> forwardList, ForwardQueryDto queryDto) {
+        if (forwardList == null || forwardList.isEmpty() || queryDto == null) {
+            return forwardList;
+        }
+
+        Integer inPort = queryDto.getInPort();
+        String groupName = normalizeGroupName(queryDto.getGroupName());
+        if (inPort == null && groupName.isEmpty()) {
+            return forwardList;
+        }
+
+        return forwardList.stream()
+                .filter(forward -> inPort == null || Objects.equals(forward.getInPort(), inPort))
+                .filter(forward -> groupName.isEmpty() || groupName.equals(normalizeGroupName(forward.getGroupName())))
+                .collect(Collectors.toList());
     }
 
     @Override
@@ -179,11 +208,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         Forward forward = new Forward();
         BeanUtils.copyProperties(forwardDto, forward);
+        String groupName = normalizeGroupName(forward.getGroupName());
+        forward.setGroupName(groupName);
         forward.setStatus(1);
         forward.setUserId(currentUser.getUserId());
         forward.setUserName(currentUser.getUserName());
         forward.setCreatedTime(System.currentTimeMillis());
         forward.setUpdatedTime(System.currentTimeMillis());
+        ensureCustomGroupExists(currentUser.getUserId(), groupName);
         List<JSONObject> success = new ArrayList<>();
         List<ChainTunnel> chainTunnels = chainTunnelService.list(new QueryWrapper<ChainTunnel>().eq("tunnel_id", tunnel.getId()).eq("chain_type", 1));
         chainTunnels = get_port(chainTunnels, forwardDto.getInPort(), 0L);
@@ -263,9 +295,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         existForward.setRemoteAddr(forwardUpdateDto.getRemoteAddr());
         existForward.setName(forwardUpdateDto.getName());
         existForward.setStrategy(forwardUpdateDto.getStrategy());
-        existForward.setGroupName(forwardUpdateDto.getGroupName());
+        String groupName = normalizeGroupName(forwardUpdateDto.getGroupName());
+        existForward.setGroupName(groupName);
         existForward.setStatus(1);
         this.updateById(existForward);
+        ensureCustomGroupExists(existForward.getUserId(), groupName);
 
 
         List<ChainTunnel> chainTunnels = chainTunnelService.list(new QueryWrapper<ChainTunnel>().eq("tunnel_id", tunnel.getId()).eq("chain_type", 1));

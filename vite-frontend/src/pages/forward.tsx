@@ -47,6 +47,13 @@ import {
   updateForwardGroup,
   getForwardGroups
 } from "@/api";
+import {
+  batchDeleteForwards,
+  batchUpdateForwardGroup,
+  createForwardGroup,
+  getForwardGroupList,
+  type ForwardGroupRecord
+} from "@/api/forward-groups";
 import { JwtUtil } from "@/utils/jwt";
 
 interface Forward {
@@ -127,6 +134,18 @@ interface TunnelGroup {
   tunnelName: string;
   forwards: Forward[];
 }
+
+interface ForwardGroupSection {
+  key: string;
+  name: string;
+  forwards: Forward[];
+  totalCount: number;
+  runningCount: number;
+  isUngrouped?: boolean;
+}
+
+const ALL_GROUP_KEY = '__all__';
+const UNGROUPED_KEY = '__ungrouped__';
 
 export default function ForwardPage() {
   const [loading, setLoading] = useState(true);

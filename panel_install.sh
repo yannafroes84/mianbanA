@@ -8,10 +8,30 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/bqlpfy/flux-panel/releases/download/2.0.7-beta/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/bqlpfy/flux-panel/releases/download/2.0.7-beta/docker-compose-v6.yml"
+REPO_OWNER="${REPO_OWNER:-yannafroes84}"
+REPO_NAME="${REPO_NAME:-mianbanA}"
+RELEASE_TAG="${RELEASE_TAG:-latest}"
+EXPLICIT_APP_VERSION="${APP_VERSION:-}"
+EXPLICIT_BACKEND_IMAGE="${BACKEND_IMAGE:-}"
+EXPLICIT_FRONTEND_IMAGE="${FRONTEND_IMAGE:-}"
+IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-ghcr.io/$(printf '%s' "$REPO_OWNER" | tr '[:upper:]' '[:lower:]')}"
+IMAGE_BASENAME="${IMAGE_BASENAME:-$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[:lower:]')}"
+BACKEND_IMAGE="${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}"
+FRONTEND_IMAGE="${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}"
 
-COUNTRY=$(curl -s https://ipinfo.io/country)
+build_release_asset_url() {
+  local asset_name="$1"
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${asset_name}"
+  else
+    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${RELEASE_TAG}/${asset_name}"
+  fi
+}
+
+DOCKER_COMPOSEV4_URL=$(build_release_asset_url "docker-compose-v4.yml")
+DOCKER_COMPOSEV6_URL=$(build_release_asset_url "docker-compose-v6.yml")
+
+COUNTRY=$(curl -fsSL https://ipinfo.io/country || true)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
@@ -155,6 +175,24 @@ generate_random() {
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c16
 }
 
+load_existing_env() {
+  if [[ -f ".env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+  fi
+  if [[ -n "$EXPLICIT_APP_VERSION" ]]; then
+    APP_VERSION="$EXPLICIT_APP_VERSION"
+  fi
+  if [[ -n "$EXPLICIT_BACKEND_IMAGE" ]]; then
+    BACKEND_IMAGE="$EXPLICIT_BACKEND_IMAGE"
+  fi
+  if [[ -n "$EXPLICIT_FRONTEND_IMAGE" ]]; then
+    FRONTEND_IMAGE="$EXPLICIT_FRONTEND_IMAGE"
+  fi
+}
+
 # 删除脚本自身
 delete_self() {
   echo ""
@@ -176,6 +214,11 @@ get_config_params() {
   read -p "后端端口（默认 6365）: " BACKEND_PORT
   BACKEND_PORT=${BACKEND_PORT:-6365}
 
+  read -p "发布版本（默认 ${RELEASE_TAG}）: " APP_VERSION_INPUT
+  APP_VERSION=${APP_VERSION_INPUT:-${APP_VERSION:-$RELEASE_TAG}}
+  BACKEND_IMAGE=${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}
+  FRONTEND_IMAGE=${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}
+
   # 生成JWT密钥
   JWT_SECRET=$(generate_random)
 }
@@ -184,12 +227,17 @@ get_config_params() {
 install_panel() {
   echo "🚀 开始安装面板..."
   check_docker
+  load_existing_env
   get_config_params
 
   echo "🔽 下载必要文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  if [[ ! -s "docker-compose.yml" ]]; then
+    echo "❌ docker-compose.yml 下载失败，请先在 GitHub 创建 release"
+    exit 1
+  fi
   echo "✅ 文件准备完成"
 
   # 自动检测并配置 IPv6 支持
@@ -202,6 +250,9 @@ install_panel() {
 JWT_SECRET=$JWT_SECRET
 FRONTEND_PORT=$FRONTEND_PORT
 BACKEND_PORT=$BACKEND_PORT
+APP_VERSION=$APP_VERSION
+BACKEND_IMAGE=$BACKEND_IMAGE
+FRONTEND_IMAGE=$FRONTEND_IMAGE
 EOF
 
   echo "🚀 启动 docker 服务..."
@@ -210,7 +261,7 @@ EOF
   echo "🎉 部署完成"
   echo "🌐 访问地址: http://服务器IP:$FRONTEND_PORT"
   echo "📖 部署完成后请阅读下使用文档，求求了啊，不要上去就是一顿操作"
-  echo "📚 文档地址: https://tes.cc/guide.html"
+  echo "📚 文档地址: https://github.com/${REPO_OWNER}/${REPO_NAME}"
   echo "💡 默认管理员账号: admin_user / admin_user"
   echo "⚠️  登录后请立即修改默认密码！"
 
@@ -221,12 +272,32 @@ EOF
 update_panel() {
   echo "🔄 开始更新面板..."
   check_docker
+  load_existing_env
+  APP_VERSION=${APP_VERSION:-$RELEASE_TAG}
+  BACKEND_IMAGE=${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}
+  FRONTEND_IMAGE=${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}
+  FRONTEND_PORT=${FRONTEND_PORT:-6366}
+  BACKEND_PORT=${BACKEND_PORT:-6365}
+  JWT_SECRET=${JWT_SECRET:-$(generate_random)}
 
   echo "🔽 下载最新配置文件..."
   DOCKER_COMPOSE_URL=$(get_docker_compose_url)
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
+  if [[ ! -s "docker-compose.yml" ]]; then
+    echo "❌ docker-compose.yml 下载失败，请先在 GitHub 创建 release"
+    exit 1
+  fi
   echo "✅ 下载完成"
+
+  cat > .env <<EOF
+JWT_SECRET=$JWT_SECRET
+FRONTEND_PORT=$FRONTEND_PORT
+BACKEND_PORT=$BACKEND_PORT
+APP_VERSION=$APP_VERSION
+BACKEND_IMAGE=$BACKEND_IMAGE
+FRONTEND_IMAGE=$FRONTEND_IMAGE
+EOF
 
   # 自动检测并配置 IPv6 支持
   if check_ipv6_support; then
@@ -322,7 +393,7 @@ main() {
   # 显示交互式菜单
   while true; do
     show_menu
-    read -p "请输入选项 (1-5): " choice
+    read -p "请输入选项 (1-4): " choice
 
     case $choice in
       1)
@@ -346,7 +417,7 @@ main() {
         exit 0
         ;;
       *)
-        echo "❌ 无效选项，请输入 1-5"
+        echo "❌ 无效选项，请输入 1-4"
         echo ""
         ;;
     esac

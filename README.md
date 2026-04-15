@@ -30,23 +30,31 @@
 #### 快速部署
 面板端(稳定版)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
 节点端(稳定版)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh
+curl -L https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh -o install.sh && chmod +x install.sh && ./install.sh
 
 ```
 
-面板端(开发版)：
+面板端(指定 release 版本)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && RELEASE_TAG=v2.0.8 ./panel_install.sh
 ```
-节点端(开发版)：
+节点端(指定 release 版本)：
 ```bash
-curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/install.sh -o install.sh && chmod +x install.sh && ./install.sh
+curl -L https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh -o install.sh && chmod +x install.sh && RELEASE_TAG=v2.0.8 ./install.sh
 
 ```
+
+### GitHub Desktop 发布流程
+1. 在 GitHub Desktop 里提交并推送代码到 `main`
+2. 在 GitHub 仓库创建一个 release tag，例如 `v2.0.8`
+3. 等待 `Release Deploy Assets` workflow 构建 GHCR 镜像和 release 附件
+4. 在服务器上执行上面的脚本，如需固定版本可在执行前设置 `RELEASE_TAG=v2.0.8`
+
+> 首次使用 GHCR 时，请将 GitHub Packages 设为 Public，否则服务器拉取镜像会出现 401。
 
 #### 默认管理员账号
 
@@ -85,8 +93,8 @@ curl -L https://raw.githubusercontent.com/bqlpfy/flux-panel/refs/heads/beta/inst
 
 | 网络       | 地址                                                                 |
 |------------|----------------------------------------------------------------------|
-| BNB(BEP20) | `0x755492c03728851bbf855daa28a1e089f9aca4d1`                          |
-| TRC20      | `TYh2L3xxXpuJhAcBWnt3yiiADiCSJLgUm7`                                  |
-| Aptos      | `0xf2f9fb14749457748506a8281628d556e8540d1eb586d202cd8b02b99d369ef8`  |
+| BNB(BEP20) | `0xc9f1b785e7ebc6b0ec1ad7905342bce3d41a0f40`                          |
+| TRC20      | `TKJuP8CwMrj8c5MxYpxV7EujJBq9kqFFwX`                                  |
+| Aptos      | `0xc39a3eca65bf6a8340b6d8815949fd4bb9b96fb0a8ce4f117823a5aa8faba838`  |
 
-[![Star History Chart](https://api.star-history.com/svg?repos=bqlpfy/flux-panel&type=Date)](https://www.star-history.com/#bqlpfy/flux-panel&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=yannafroes84/mianbanA&type=Date)](https://www.star-history.com/#yannafroes84/mianbanA&Date)

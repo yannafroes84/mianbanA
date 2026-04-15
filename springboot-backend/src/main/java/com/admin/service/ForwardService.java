@@ -1,12 +1,17 @@
 package com.admin.service;
 
 import com.admin.common.dto.ForwardDto;
+import com.admin.common.dto.ForwardBatchDeleteDto;
+import com.admin.common.dto.ForwardBatchGroupDto;
+import com.admin.common.dto.ForwardGroupCreateDto;
+import com.admin.common.dto.ForwardGroupDeleteDto;
+import com.admin.common.dto.ForwardGroupUpdateDto;
+import com.admin.common.dto.ForwardGroupsResponseDto;
+import com.admin.common.dto.ForwardQueryDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.entity.Forward;
 import com.baomidou.mybatisplus.extension.service.IService;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * <p>
@@ -29,7 +34,7 @@ public interface ForwardService extends IService<Forward> {
      * 获取端口转发列表
      * @return 结果
      */
-    R getAllForwards();
+    R getAllForwards(ForwardQueryDto queryDto);
 
     /**
      * 更新端口转发
@@ -81,7 +86,15 @@ public interface ForwardService extends IService<Forward> {
      */
     R updateForwardOrder(Map<String, Object> params);
 
-    R updateForwardGroup(Long id, String groupName);
+    R updateForwardGroup(ForwardGroupUpdateDto forwardGroupUpdateDto);
+
+    R batchUpdateForwardGroup(ForwardBatchGroupDto batchGroupDto);
+
+    R deleteForwardGroup(Long id);
+
+    R createForwardGroup(ForwardGroupCreateDto createDto);
+
+    R batchDeleteForward(ForwardBatchDeleteDto batchDeleteDto);
 
     R getForwardGroups();
 }

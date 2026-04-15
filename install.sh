@@ -17,15 +17,28 @@ get_architecture() {
 }
 
 # 构建下载地址
+REPO_OWNER="${REPO_OWNER:-yannafroes84}"
+REPO_NAME="${REPO_NAME:-mianbanA}"
+RELEASE_TAG="${RELEASE_TAG:-latest}"
+
+build_release_asset_url() {
+    local asset_name="$1"
+    if [[ "$RELEASE_TAG" == "latest" ]]; then
+        echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${asset_name}"
+    else
+        echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${RELEASE_TAG}/${asset_name}"
+    fi
+}
+
 build_download_url() {
     local ARCH=$(get_architecture)
-    echo "https://github.com/bqlpfy/flux-panel/releases/download/2.0.7-beta/gost-${ARCH}"
+    build_release_asset_url "gost-${ARCH}"
 }
 
 # 下载地址
 DOWNLOAD_URL=$(build_download_url)
 INSTALL_DIR="/etc/flux_agent"
-COUNTRY=$(curl -s https://ipinfo.io/country)
+COUNTRY=$(curl -fsSL https://ipinfo.io/country || true)
 if [ "$COUNTRY" = "CN" ]; then
     # 拼接 URL
     DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
