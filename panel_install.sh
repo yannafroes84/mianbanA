@@ -15,25 +15,25 @@ IMAGE_BASENAME="${IMAGE_BASENAME:-$(printf '%s' "$REPO_NAME" | tr '[:upper:]' '[
 BACKEND_IMAGE="${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}"
 FRONTEND_IMAGE="${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}"
 
-build_release_asset_url() {
-  local asset_name="$1"
+get_source_ref() {
   if [[ "$RELEASE_TAG" == "latest" ]]; then
-    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${asset_name}"
+    echo "main"
   else
-    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${RELEASE_TAG}/${asset_name}"
+    echo "$RELEASE_TAG"
   fi
 }
 
-get_release_page_url() {
-  if [[ "$RELEASE_TAG" == "latest" ]]; then
-    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
-  else
-    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/tag/${RELEASE_TAG}"
-  fi
+build_raw_file_url() {
+  local file_name="$1"
+  echo "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/$(get_source_ref)/${file_name}"
 }
 
-RAW_DOCKER_COMPOSEV4_URL="$(build_release_asset_url "docker-compose-v4.yml")"
-RAW_DOCKER_COMPOSEV6_URL="$(build_release_asset_url "docker-compose-v6.yml")"
+get_source_page_url() {
+  echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/tree/$(get_source_ref)"
+}
+
+RAW_DOCKER_COMPOSEV4_URL="$(build_raw_file_url "docker-compose-v4.yml")"
+RAW_DOCKER_COMPOSEV6_URL="$(build_raw_file_url "docker-compose-v6.yml")"
 DOCKER_COMPOSEV4_URL="$RAW_DOCKER_COMPOSEV4_URL"
 DOCKER_COMPOSEV6_URL="$RAW_DOCKER_COMPOSEV6_URL"
 
@@ -43,14 +43,14 @@ if [[ "$COUNTRY" == "CN" ]]; then
   DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
 fi
 
-print_release_asset_error() {
+print_compose_source_error() {
   local asset_name="$1"
-  echo "Error: missing GitHub release asset: ${asset_name}"
-  echo "Release page: $(get_release_page_url)"
+  echo "Error: missing compose file: ${asset_name}"
+  echo "Source page: $(get_source_page_url)"
   if [[ "$RELEASE_TAG" == "latest" ]]; then
-    echo "Create a release/tag first, then wait for the workflow to upload ${asset_name}."
+    echo "Make sure ${asset_name} exists on the main branch."
   else
-    echo "Make sure tag ${RELEASE_TAG} has been released and includes ${asset_name}."
+    echo "Make sure ref ${RELEASE_TAG} exists and includes ${asset_name}."
   fi
 }
 
@@ -106,13 +106,13 @@ download_compose_file() {
 
   echo "Using compose asset: ${asset_name}"
   if ! curl -fsLI --connect-timeout 15 "$raw_url" >/dev/null 2>&1; then
-    print_release_asset_error "$asset_name"
+    print_compose_source_error "$asset_name"
     return 1
   fi
 
   rm -f docker-compose.yml
   if ! curl -fL --retry 3 --connect-timeout 15 -o docker-compose.yml "$download_url"; then
-    print_release_asset_error "$asset_name"
+    print_compose_source_error "$asset_name"
     return 1
   fi
 
@@ -124,7 +124,7 @@ download_compose_file() {
   if grep -aqE '^(Not Found|404: Not Found)$|^<html|^<!DOCTYPE html' docker-compose.yml; then
     echo "Error: downloaded docker-compose.yml is not valid"
     rm -f docker-compose.yml
-    print_release_asset_error "$asset_name"
+    print_compose_source_error "$asset_name"
     return 1
   fi
 

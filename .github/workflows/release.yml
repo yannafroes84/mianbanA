@@ -2,6 +2,8 @@ name: Release Deploy Assets
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
@@ -29,6 +31,8 @@ jobs:
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             release_tag="${{ github.event.inputs.release_tag }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "branch" ]]; then
+            release_tag="main-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
           else
             release_tag="${GITHUB_REF_NAME}"
           fi
@@ -140,6 +144,7 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.release_tag }}
           target_commitish: ${{ needs.prepare.outputs.target_commitish }}
           body_path: release-body.md
+          make_latest: true
           files: |
             docker-compose-v4.yml
             docker-compose-v6.yml
