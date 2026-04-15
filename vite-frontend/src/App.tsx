@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import IndexPage from "@/pages/index";
 import ChangePasswordPage from "@/pages/change-password";
 import DashboardPage from "@/pages/dashboard";
-import ForwardPage from "@/pages/forward";
+import ForwardPage from "@/pages/forward-v2";
 import TunnelPage from "@/pages/tunnel";
 import NodePage from "@/pages/node";
 import UserPage from "@/pages/user";

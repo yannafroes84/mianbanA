@@ -128,6 +128,12 @@ public class ForwardController extends BaseController {
     }
 
     @LogAnnotation
+    @PostMapping("/group/list")
+    public R getForwardGroupList() {
+        return forwardService.getForwardGroupList();
+    }
+
+    @LogAnnotation
     @PostMapping("/group/delete")
     public R deleteForwardGroup(@Validated @RequestBody ForwardGroupDeleteDto deleteDto) {
         return forwardService.deleteForwardGroup(deleteDto.getId());

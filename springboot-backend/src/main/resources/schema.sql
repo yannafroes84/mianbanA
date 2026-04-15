@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS forward (
   group_name VARCHAR(100) NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS forward_group (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  group_name VARCHAR(100) NOT NULL,
+  created_time INTEGER NOT NULL,
+  updated_time INTEGER NOT NULL,
+  status INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS forward_port (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   forward_id INTEGER NOT NULL,
@@ -129,6 +138,8 @@ CREATE TABLE IF NOT EXISTS vite_config (
 CREATE INDEX IF NOT EXISTS idx_forward_user_id ON forward(user_id);
 CREATE INDEX IF NOT EXISTS idx_forward_tunnel_id ON forward(tunnel_id);
 CREATE INDEX IF NOT EXISTS idx_forward_group_name ON forward(group_name);
+CREATE INDEX IF NOT EXISTS idx_forward_group_user_id ON forward_group(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_forward_group_user_name ON forward_group(user_id, group_name);
 CREATE INDEX IF NOT EXISTS idx_forward_port_forward_id ON forward_port(forward_id);
 CREATE INDEX IF NOT EXISTS idx_forward_port_node_id ON forward_port(node_id);
 CREATE INDEX IF NOT EXISTS idx_chain_tunnel_tunnel_id ON chain_tunnel(tunnel_id);
@@ -138,4 +149,3 @@ CREATE INDEX IF NOT EXISTS idx_user_tunnel_tunnel_id ON user_tunnel(tunnel_id);
 CREATE INDEX IF NOT EXISTS idx_statistics_flow_user_id ON statistics_flow(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_node_secret ON node(secret);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_user_user ON user(user);
-

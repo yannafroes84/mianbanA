@@ -12,6 +12,7 @@ import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.entity.Forward;
 import com.baomidou.mybatisplus.extension.service.IService;
+import java.util.Map;
 
 /**
  * <p>
@@ -93,6 +94,8 @@ public interface ForwardService extends IService<Forward> {
     R deleteForwardGroup(Long id);
 
     R createForwardGroup(ForwardGroupCreateDto createDto);
+
+    R getForwardGroupList();
 
     R batchDeleteForward(ForwardBatchDeleteDto batchDeleteDto);
 
