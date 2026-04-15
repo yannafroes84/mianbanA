@@ -74,9 +74,11 @@ COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
 append_candidate_url() {
   local -n target_array="$1"
   local raw_url="$2"
-  target_array+=("$raw_url")
   if [[ "$COUNTRY" == "CN" ]]; then
     target_array+=("https://ghfast.top/${raw_url}")
+    target_array+=("$raw_url")
+  else
+    target_array+=("$raw_url")
   fi
 }
 
@@ -106,7 +108,7 @@ download_release_asset() {
   local asset_name="$3"
 
   rm -f "$output_path"
-  if ! curl -fL --retry 3 --connect-timeout 15 "$url" -o "$output_path"; then
+  if ! curl -fL --retry 2 --connect-timeout 15 --max-time 180 "$url" -o "$output_path"; then
     print_release_asset_error "$asset_name"
     return 1
   fi
@@ -142,7 +144,7 @@ install_go_toolchain() {
   fi
 
   echo "Installing Go toolchain..."
-  if ! curl -fL --retry 3 --connect-timeout 15 "$go_url" -o /tmp/go-toolchain.tar.gz; then
+  if ! curl -fL --retry 2 --connect-timeout 15 --max-time 600 "$go_url" -o /tmp/go-toolchain.tar.gz; then
     echo "Error: failed to download Go toolchain"
     return 1
   fi
@@ -177,7 +179,7 @@ build_flux_agent_from_source() {
 
   for url in "${archive_urls[@]}"; do
     echo "Source URL: $url"
-    if curl -fL --retry 3 --connect-timeout 15 "$url" -o "$temp_dir/repo.tar.gz"; then
+    if curl -fL --retry 2 --connect-timeout 15 --max-time 180 "$url" -o "$temp_dir/repo.tar.gz"; then
       break
     fi
     rm -f "$temp_dir/repo.tar.gz"
