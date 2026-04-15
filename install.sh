@@ -200,12 +200,6 @@ download_flux_agent_binary() {
     fi
   fi
 
-  if ! "$output_path" -V >/dev/null 2>&1; then
-    echo "Error: downloaded file cannot be executed: ${output_path}"
-    print_release_asset_error "$asset_name"
-    return 1
-  fi
-
   return 0
 }
 
@@ -339,7 +333,7 @@ install_flux_agent() {
     exit 1
   fi
 
-  echo "Version: $("$BIN_PATH" -V)"
+  echo "Binary installed: $BIN_PATH"
 
   cat > "$INSTALL_DIR/config.json" <<EOF
 {
@@ -406,7 +400,7 @@ update_flux_agent() {
 
   mv "${BIN_PATH}.new" "$BIN_PATH"
   chmod +x "$BIN_PATH"
-  echo "Version: $("$BIN_PATH" -V)"
+  echo "Binary updated: $BIN_PATH"
 
   systemctl start flux_agent
   echo "Update completed"
