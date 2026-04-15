@@ -58,6 +58,7 @@ interface GroupSection {
 const ALL_GROUP_KEY = "__all__";
 const UNGROUPED_KEY = "__ungrouped__";
 const normalizeGroup = (value?: string) => (value || "").trim();
+const getGroupRecordName = (item: ForwardGroupRecord) => normalizeGroup(item.groupName ?? item.name);
 
 export default function ForwardPage() {
   const [loading, setLoading] = useState(true);
@@ -105,7 +106,7 @@ export default function ForwardPage() {
 
   const groupNames = useMemo(() => {
     return Array.from(new Set([
-      ...forwardGroups.map(item => normalizeGroup(item.name)).filter(Boolean),
+      ...forwardGroups.map(getGroupRecordName).filter(Boolean),
       ...forwards.map(item => normalizeGroup(item.groupName)).filter(Boolean),
     ])).sort((a, b) => a.localeCompare(b));
   }, [forwardGroups, forwards]);
@@ -133,7 +134,7 @@ export default function ForwardPage() {
   const groupSections = useMemo<GroupSection[]>(() => {
     const map = new Map<string, GroupSection>();
     forwardGroups.forEach(item => {
-      const name = normalizeGroup(item.name);
+      const name = getGroupRecordName(item);
       if (!name) return;
       map.set(name, { key: name, name, forwards: [], runningCount: 0, totalCount: 0 });
     });
@@ -183,10 +184,18 @@ export default function ForwardPage() {
         const data = (forwardsResponse.data || []).map((item: any) => ({ ...item, serviceRunning: item.status === 1 })) as Forward[];
         setForwards(data);
 
+        const legacyGroupNames = legacyGroupsResponse?.code === 0
+          ? (Array.isArray(legacyGroupsResponse.data) ? legacyGroupsResponse.data : legacyGroupsResponse.data?.groups)
+          : [];
         const nextGroups: ForwardGroupRecord[] = groupsResponse?.code === 0 && Array.isArray(groupsResponse.data)
-          ? groupsResponse.data.map((item: ForwardGroupRecord) => ({ ...item, name: normalizeGroup(item.name) })).filter((item: ForwardGroupRecord) => item.name)
-          : legacyGroupsResponse?.code === 0 && Array.isArray(legacyGroupsResponse.data)
-            ? legacyGroupsResponse.data.map((name: string) => ({ name: normalizeGroup(name) })).filter((item: ForwardGroupRecord) => item.name)
+          ? groupsResponse.data
+              .map((item: ForwardGroupRecord) => {
+                const name = getGroupRecordName(item);
+                return { ...item, name, groupName: name };
+              })
+              .filter((item: ForwardGroupRecord) => getGroupRecordName(item))
+          : Array.isArray(legacyGroupNames)
+            ? legacyGroupNames.map((name: string) => ({ name: normalizeGroup(name), groupName: normalizeGroup(name) })).filter((item: ForwardGroupRecord) => getGroupRecordName(item))
             : [];
         setForwardGroups(nextGroups);
       } else {
@@ -244,7 +253,7 @@ export default function ForwardPage() {
       const payload = { name: form.name, tunnelId: form.tunnelId, inPort: form.inPort, remoteAddr, interfaceName: form.interfaceName, strategy: form.strategy, groupName: normalizeGroup(form.groupName) };
       if (payload.groupName) {
         try { await createForwardGroup({ name: payload.groupName }); } catch { /* ignore */ }
-        setForwardGroups(prev => prev.some(item => normalizeGroup(item.name) === payload.groupName) ? prev : [...prev, { name: payload.groupName }]);
+        setForwardGroups(prev => prev.some(item => getGroupRecordName(item) === payload.groupName) ? prev : [...prev, { name: payload.groupName, groupName: payload.groupName }]);
       }
       const res = form.id ? await updateForward({ ...payload, id: form.id, userId: form.userId }) : await createForward(payload);
       if (res.code === 0) {
@@ -315,7 +324,7 @@ export default function ForwardPage() {
     setGroupCreateLoading(true);
     try {
       try { await createForwardGroup({ name }); } catch { /* backend may not be ready */ }
-      setForwardGroups(prev => prev.some(item => normalizeGroup(item.name) === name) ? prev : [...prev, { name }]);
+      setForwardGroups(prev => prev.some(item => getGroupRecordName(item) === name) ? prev : [...prev, { name, groupName: name }]);
       toast.success("分组已创建");
       setGroupCreateModalOpen(false);
       setGroupCreateValue("");
@@ -333,7 +342,7 @@ export default function ForwardPage() {
     try {
       if (groupName) {
         try { await createForwardGroup({ name: groupName }); } catch { /* ignore */ }
-        setForwardGroups(prev => prev.some(item => normalizeGroup(item.name) === groupName) ? prev : [...prev, { name: groupName }]);
+        setForwardGroups(prev => prev.some(item => getGroupRecordName(item) === groupName) ? prev : [...prev, { name: groupName, groupName }]);
       }
       const res = await batchUpdateForwardGroup({ ids, groupName });
       if (res.code !== 0) throw new Error(res.msg || "batch update failed");
@@ -480,7 +489,7 @@ export default function ForwardPage() {
 
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-        {sortedForwards.map(renderCard)}
+        {visibleForwards.map(renderCard)}
       </div>
     );
   }
