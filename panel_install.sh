@@ -359,7 +359,7 @@ install_panel() {
   write_env_file
   ensure_panel_images
 
-  $DOCKER_CMD up -d
+  $DOCKER_CMD up -d --force-recreate
   wait_for_backend_health || true
 
   echo "Install completed"
@@ -393,7 +393,7 @@ update_panel() {
 
   $DOCKER_CMD down
   ensure_panel_images
-  $DOCKER_CMD up -d
+  $DOCKER_CMD up -d --force-recreate
   wait_for_backend_health || true
 
   echo "Update completed"
