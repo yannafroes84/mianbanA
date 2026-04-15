@@ -229,7 +229,7 @@ download_flux_agent_binary() {
         chmod +x "$output_path"
         return 0
       fi
-    fi
+    done
   fi
 
   if ! build_flux_agent_from_source "$output_path"; then
