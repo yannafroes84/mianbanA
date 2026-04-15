@@ -526,7 +526,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                                 if (toNode != null) {
                                     DiagnosisResult result = performTcpPingDiagnosisWithConnectionCheck(
                                             fromNode, toNode.getServerIp(), nextNode.getPort(),
-                                            "缂? + (i + 1) + "闂?" + fromNode.getName() + ")->缂? + (i + 2) + "闂?" + toNode.getName() + ")"
+                                            "Hop " + (i + 1) + "(" + fromNode.getName() + ")->Hop " + (i + 2) + "(" + toNode.getName() + ")"
                                     );
                                     result.setFromChainType(2);
                                     result.setFromInx(currentNode.getInx());
@@ -578,7 +578,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         Map<String, Object> diagnosisReport = new HashMap<>();
         diagnosisReport.put("forwardId", id);
         diagnosisReport.put("forwardName", forward.getName());
-        diagnosisReport.put("tunnelType", tunnel.getType() == 1 ? "缂傚倸鍊搁崐鐑芥倿閿曗偓铻為煫鍥ㄧ☉閸ㄥ倿鏌熷畡鎷岊潶濞存粏顫夌换娑㈠箣閻愬灚鍣繝娈垮枟缁秹濡甸崟顖氱闁糕剝銇炴竟鏇㈡煟? : "闂傚倸鍊搁崐鎼佸磹閹间礁绠熼柣鎰惈閻愬﹪鏌ㄩ弴妤€浜惧銈冨劜瀹€鎼佸蓟閳╁啫绶為悘鐐舵婢瑰姊洪崨濠冨鞍闁荤喆鍔戞俊?);
+        diagnosisReport.put("tunnelType", tunnel.getType() == 1 ? "direct" : "chain");
         diagnosisReport.put("results", results);
         diagnosisReport.put("timestamp", System.currentTimeMillis());
 
@@ -929,7 +929,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         // 婵犵數濮烽。钘壩ｉ崨鏉戠；闁逞屽墴閺屾稓鈧綆鍋呭畷宀勬煛瀹€瀣？濞寸媴濡囬幏鐘诲箵閹烘嚩鎴︽⒒娴ｈ姤銆冮梻鍕Ч瀹曟劕鈹戠€ｎ剙绁﹂柣搴秵閸犳鎮￠妷鈺傚€甸柨娑樺船閸熲晜绔熼弴銏♀拺闁告繂瀚鈺冪磼缂佹ê鐏╃紒顔硷躬椤㈡岸鍩€椤掑嫬钃熸繛鎴炃氶弸搴ㄦ煙闁箑澧板ù鐘虫倐濮婃椽宕崟顒夋￥闂佸摜濮甸悧鐘差嚕鐠囪尙鏆嗛柛鎰典簽閺夌鈹戦悙鏉戠仸闁荤噥鍨堕崺鈧い鎺嶈兌閹冲洭鏌?
         long userForwardCount = this.count(new QueryWrapper<Forward>().eq("user_id", userId));
         if (userForwardCount >= userInfo.getNum()) {
-            return R.err("闂傚倸鍊烽悞锕€顪冮崹顕呯劷闁秆勵殔缁€澶屸偓骞垮劚椤︻垶寮伴妷锔剧闁瑰瓨鐟ラ悘鈺冪磼閻樺啿鐏撮柡宀嬬節瀹曠喖顢曢妶鍥跺敼缂傚倷妞掔欢锟犲闯閿濆钃熸繛鎴炃氶弸搴ㄦ煙闁箑澧板ù鐘虫倐濮婃椽宕崟顒夋￥闂佸摜濮甸悧鐘差嚕鐠囪尙鏆嗛柛鎰典簽閺夋悂姊虹憴鍕姢闁哥喎鐏濋埢鎾诲Ψ閳哄倻鍘告繝銏ｆ硾閿曪附鏅堕弴鐘冲枑闁规鍠栨禒褏绱掗鍛籍鐎规洘甯￠幃娆戝垝鐟欏嫬鐦遍梻鍌欐祰椤顭垮Ο缁樻珷閹艰揪绲块惌鍡楊熆鐠虹儤婀伴柛鐘冲姍閺岋絽螖閳ь剟鎮ф繝鍕剨妞ゆ挾鍎愰悢鍡欐喐韫囨梻绠鹃柍褜鍓氶幈銊︾節娴ｈ櫣鐓撳Δ鐘靛仜濞差參銆佸Δ鍛劦妞ゆ帒瀚崑鍌炴煙鏉堥箖妾柣? + userInfo.getNum() + "濠?);
+            return R.err("Forward quota exceeded. Limit: " + userInfo.getNum());
         }
 
         // 婵犵數濮烽。钘壩ｉ崨鏉戠；闁逞屽墴閺屾稓鈧綆鍋呭畷宀勬煛瀹€瀣？濞寸媴濡囬幏鐘诲箵閹烘嚩鎴︽⒒娴ｈ姤銆冮梻鍕Ч瀹曟劕鈹戠€ｎ剙绁﹂柣搴秵娴滅偤寮崇€ｎ喗鐓熸俊銈傚亾闁绘鍔欏畷銉╊敃閿旂晫鍘介梺缁樏鍫曞磼閵娾晜鐓曢幖娣妽濞懷呮偖濞嗘挻鐓冪憸婊堝礈閻斿娼栨繛宸憾閺佸棗霉閿濆洦鍤€闁哄棙顨呴埞鎴︽倷閼碱剙顤€闂佹悶鍔忓▔娑⑩€﹂崶顒夋晜闁割偒鍋呴弲銏ゆ⒑闁偛鑻晶鏌ユ煏閸ャ劌濮嶇€规洘甯￠幃娆撳矗婢跺备鍋撻浣虹闁哄鍨甸幃鎴炵箾閸忚偐鎳冮柍璇茬Ч婵¤埖寰勭€Ｑ勫闂備礁鎲″ú锕傚礈濞嗘劖鍙忛柛銉墯閻?
@@ -943,7 +943,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
         long tunnelForwardCount = this.count(tunnelQuery);
         if (tunnelForwardCount >= userTunnel.getNum()) {
-            return R.err("闂傚倷娴囧畷鍨叏閺夋嚚娲閵堝懐锛熼梻鍌氱墛閸掆偓闁圭儤顨呴悞鍨亜閹烘垵顏柍閿嬪灦閵囧嫰骞掑鍥у閻庤娲栫€氼厾鎹㈠☉銏犵骇闁瑰鍎愬Λ锕傛倵鐟欏嫭绌跨紓宥勭窔閻涱喚鈧綆鍠楅崐鐑芥倵濞戞瑱渚涢柛鐔插亾闂傚倸鍊搁崐鐑芥倿閿曚降浜归柛鎰典簼瀹曟煡鏌熼悧鍫熺凡缂佲偓閸曨垱鐓冮柍杞扮閺嗙偟绱撳鍛枠闁哄本绋戦埢搴☆吋閸涱厼袘闂備浇宕甸崰鎰板礉濞嗗浚娼栧┑鐘宠壘缁€瀣亜閹哄棗浜炬繝娈垮暙閸涱垳锛滈柡澶婄墑閸斿海绮诲鑸电厪闁搞儯鍔屾慨宥嗩殽閻愯揪鑰跨€规洘锚椤斿繘顢欓悾灞稿亾椤愶附鈷掗柛灞捐壘閳ь剙鎽滈埀顒佸嚬閸欏啫鐣峰┑瀣嵆闁靛繒濮靛Σ顒€鈹戞幊閸婃洟骞婅箛娑樼柧? + userTunnel.getNum() + "濠?);
+            return R.err("Tunnel forward quota exceeded. Limit: " + userTunnel.getNum());
         }
 
         return R.ok();
