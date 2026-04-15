@@ -332,6 +332,17 @@ wait_for_backend_health() {
   return 1
 }
 
+get_panel_host() {
+  local public_ip=""
+  public_ip="$(curl -fsSL --connect-timeout 5 https://api.ipify.org 2>/dev/null || true)"
+  if [[ -n "$public_ip" ]]; then
+    echo "$public_ip"
+    return 0
+  fi
+
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
 install_panel() {
   echo "Installing panel..."
   check_docker
@@ -352,7 +363,7 @@ install_panel() {
   wait_for_backend_health || true
 
   echo "Install completed"
-  echo "Panel URL: http://SERVER_IP:${FRONTEND_PORT}"
+  echo "Panel URL: http://$(get_panel_host):${FRONTEND_PORT}"
   echo "Repository: https://github.com/${REPO_OWNER}/${REPO_NAME}"
   echo "Default admin: admin_user / admin_user"
   echo "Change the default password after login"
