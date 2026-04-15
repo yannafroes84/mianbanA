@@ -1,13 +1,9 @@
 #!/bin/bash
 set -e
 
-# 解决 macOS 下 tr 可能出现的非法字节序列问题
 export LANG=en_US.UTF-8
 export LC_ALL=C
 
-
-
-# 全局下载地址配置
 REPO_OWNER="${REPO_OWNER:-yannafroes84}"
 REPO_NAME="${REPO_NAME:-mianbanA}"
 RELEASE_TAG="${RELEASE_TAG:-latest}"
@@ -28,146 +24,173 @@ build_release_asset_url() {
   fi
 }
 
-DOCKER_COMPOSEV4_URL=$(build_release_asset_url "docker-compose-v4.yml")
-DOCKER_COMPOSEV6_URL=$(build_release_asset_url "docker-compose-v6.yml")
+get_release_page_url() {
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
+  else
+    echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/tag/${RELEASE_TAG}"
+  fi
+}
 
-COUNTRY=$(curl -fsSL https://ipinfo.io/country || true)
-if [ "$COUNTRY" = "CN" ]; then
-    # 拼接 URL
-    DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
-    DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
+RAW_DOCKER_COMPOSEV4_URL="$(build_release_asset_url "docker-compose-v4.yml")"
+RAW_DOCKER_COMPOSEV6_URL="$(build_release_asset_url "docker-compose-v6.yml")"
+DOCKER_COMPOSEV4_URL="$RAW_DOCKER_COMPOSEV4_URL"
+DOCKER_COMPOSEV6_URL="$RAW_DOCKER_COMPOSEV6_URL"
+
+COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
+if [[ "$COUNTRY" == "CN" ]]; then
+  DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
+  DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
 fi
 
+print_release_asset_error() {
+  local asset_name="$1"
+  echo "Error: missing GitHub release asset: ${asset_name}"
+  echo "Release page: $(get_release_page_url)"
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "Create a release/tag first, then wait for the workflow to upload ${asset_name}."
+  else
+    echo "Make sure tag ${RELEASE_TAG} has been released and includes ${asset_name}."
+  fi
+}
 
+has_ipv6_support() {
+  if command -v ip >/dev/null 2>&1 && ip -6 addr show 2>/dev/null | grep -v "scope link" | grep -q "inet6"; then
+    return 0
+  fi
+  if command -v ifconfig >/dev/null 2>&1 && ifconfig 2>/dev/null | grep -v "fe80:" | grep -q "inet6"; then
+    return 0
+  fi
+  return 1
+}
 
-# 根据IPv6支持情况选择docker-compose URL
+check_ipv6_support() {
+  echo "Checking IPv6 support..."
+  if has_ipv6_support; then
+    echo "IPv6 is available"
+    return 0
+  fi
+  echo "IPv6 is not available"
+  return 1
+}
+
+get_compose_asset_name() {
+  if has_ipv6_support; then
+    echo "docker-compose-v6.yml"
+  else
+    echo "docker-compose-v4.yml"
+  fi
+}
+
 get_docker_compose_url() {
-  if check_ipv6_support > /dev/null 2>&1; then
+  if has_ipv6_support; then
     echo "$DOCKER_COMPOSEV6_URL"
   else
     echo "$DOCKER_COMPOSEV4_URL"
   fi
 }
 
-# 检查 docker-compose 或 docker compose 命令
-check_docker() {
-  if command -v docker-compose &> /dev/null; then
-    DOCKER_CMD="docker-compose"
-  elif command -v docker &> /dev/null; then
-    if docker compose version &> /dev/null; then
-      DOCKER_CMD="docker compose"
-    else
-      echo "错误：检测到 docker，但不支持 'docker compose' 命令。请安装 docker-compose 或更新 docker 版本。"
-      exit 1
-    fi
+get_raw_docker_compose_url() {
+  if has_ipv6_support; then
+    echo "$RAW_DOCKER_COMPOSEV6_URL"
   else
-    echo "错误：未检测到 docker 或 docker-compose 命令。请先安装 Docker。"
-    exit 1
+    echo "$RAW_DOCKER_COMPOSEV4_URL"
   fi
-  echo "检测到 Docker 命令：$DOCKER_CMD"
 }
 
-# 检测系统是否支持 IPv6
-check_ipv6_support() {
-  echo "🔍 检测 IPv6 支持..."
+download_compose_file() {
+  local asset_name raw_url download_url
+  asset_name="$(get_compose_asset_name)"
+  raw_url="$(get_raw_docker_compose_url)"
+  download_url="$(get_docker_compose_url)"
 
-  # 检查是否有 IPv6 地址（排除 link-local 地址）
-  if ip -6 addr show | grep -v "scope link" | grep -q "inet6"; then
-    echo "✅ 检测到系统支持 IPv6"
-    return 0
-  elif ifconfig 2>/dev/null | grep -v "fe80:" | grep -q "inet6"; then
-    echo "✅ 检测到系统支持 IPv6"
-    return 0
-  else
-    echo "⚠️ 未检测到 IPv6 支持"
+  echo "Using compose asset: ${asset_name}"
+  if ! curl -fsLI --connect-timeout 15 "$raw_url" >/dev/null 2>&1; then
+    print_release_asset_error "$asset_name"
+    return 1
+  fi
+
+  rm -f docker-compose.yml
+  if ! curl -fL --retry 3 --connect-timeout 15 -o docker-compose.yml "$download_url"; then
+    print_release_asset_error "$asset_name"
+    return 1
+  fi
+
+  if [[ ! -s docker-compose.yml ]]; then
+    echo "Error: downloaded docker-compose.yml is empty"
+    return 1
+  fi
+
+  if grep -aqE '^(Not Found|404: Not Found)$|^<html|^<!DOCTYPE html' docker-compose.yml; then
+    echo "Error: downloaded docker-compose.yml is not valid"
+    rm -f docker-compose.yml
+    print_release_asset_error "$asset_name"
+    return 1
+  fi
+
+  if ! grep -q "services:" docker-compose.yml; then
+    echo "Error: docker-compose.yml validation failed"
     return 1
   fi
 }
 
+check_docker() {
+  if command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_CMD="docker-compose"
+  elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    DOCKER_CMD="docker compose"
+  else
+    echo "Error: docker compose command is not available"
+    exit 1
+  fi
+  echo "Docker command: ${DOCKER_CMD}"
+}
 
-
-# 配置 Docker 启用 IPv6
 configure_docker_ipv6() {
-  echo "🔧 配置 Docker IPv6 支持..."
+  echo "Configuring Docker IPv6..."
 
-  # 检查操作系统类型
-  OS_TYPE=$(uname -s)
-
-  if [[ "$OS_TYPE" == "Darwin" ]]; then
-    # macOS 上 Docker Desktop 已默认支持 IPv6
-    echo "✅ macOS Docker Desktop 默认支持 IPv6"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "Docker Desktop on macOS already supports IPv6"
     return 0
   fi
 
-  # Docker daemon 配置文件路径
-  DOCKER_CONFIG="/etc/docker/daemon.json"
-
-  # 检查是否需要 sudo
+  local docker_config="/etc/docker/daemon.json"
+  local sudo_cmd=""
   if [[ $EUID -ne 0 ]]; then
-    SUDO_CMD="sudo"
-  else
-    SUDO_CMD=""
+    sudo_cmd="sudo"
   fi
 
-  # 检查 Docker 配置文件
-  if [ -f "$DOCKER_CONFIG" ]; then
-    # 检查是否已经配置了 IPv6
-    if grep -q '"ipv6"' "$DOCKER_CONFIG"; then
-      echo "✅ Docker 已配置 IPv6 支持"
-    else
-      echo "📝 更新 Docker 配置以启用 IPv6..."
-      # 备份原配置
-      $SUDO_CMD cp "$DOCKER_CONFIG" "${DOCKER_CONFIG}.backup"
+  if [[ -f "$docker_config" ]] && grep -q '"ipv6"' "$docker_config"; then
+    echo "Docker IPv6 is already configured"
+    return 0
+  fi
 
-      # 使用 jq 或 sed 添加 IPv6 配置
-      if command -v jq &> /dev/null; then
-        $SUDO_CMD jq '. + {"ipv6": true, "fixed-cidr-v6": "fd00::/80"}' "$DOCKER_CONFIG" > /tmp/daemon.json && $SUDO_CMD mv /tmp/daemon.json "$DOCKER_CONFIG"
-      else
-        # 如果没有 jq，使用 sed
-        $SUDO_CMD sed -i 's/^{$/{\n  "ipv6": true,\n  "fixed-cidr-v6": "fd00::\/80",/' "$DOCKER_CONFIG"
-      fi
-
-      echo "🔄 重启 Docker 服务..."
-      if command -v systemctl &> /dev/null; then
-        $SUDO_CMD systemctl restart docker
-      elif command -v service &> /dev/null; then
-        $SUDO_CMD service docker restart
-      else
-        echo "⚠️ 请手动重启 Docker 服务"
-      fi
-      sleep 5
-    fi
-  else
-    # 创建新的配置文件
-    echo "📝 创建 Docker 配置文件..."
-    $SUDO_CMD mkdir -p /etc/docker
-    echo '{
+  $sudo_cmd mkdir -p /etc/docker
+  cat <<'EOF' | $sudo_cmd tee "$docker_config" >/dev/null
+{
   "ipv6": true,
   "fixed-cidr-v6": "fd00::/80"
-}' | $SUDO_CMD tee "$DOCKER_CONFIG" > /dev/null
+}
+EOF
 
-    echo "🔄 重启 Docker 服务..."
-    if command -v systemctl &> /dev/null; then
-      $SUDO_CMD systemctl restart docker
-    elif command -v service &> /dev/null; then
-      $SUDO_CMD service docker restart
-    else
-      echo "⚠️ 请手动重启 Docker 服务"
-    fi
-    sleep 5
+  if command -v systemctl >/dev/null 2>&1; then
+    $sudo_cmd systemctl restart docker
+  elif command -v service >/dev/null 2>&1; then
+    $sudo_cmd service docker restart
+  else
+    echo "Please restart Docker manually"
   fi
+  sleep 5
 }
 
-# 显示菜单
 show_menu() {
   echo "==============================================="
-  echo "          面板管理脚本"
+  echo "              Panel Manager"
   echo "==============================================="
-  echo "请选择操作："
-  echo "1. 安装面板"
-  echo "2. 更新面板"
-  echo "3. 卸载面板"
-  echo "4. 退出"
+  echo "1. Install panel"
+  echo "2. Update panel"
+  echo "3. Uninstall panel"
+  echo "4. Exit"
   echo "==============================================="
 }
 
@@ -182,6 +205,7 @@ load_existing_env() {
     . ./.env
     set +a
   fi
+
   if [[ -n "$EXPLICIT_APP_VERSION" ]]; then
     APP_VERSION="$EXPLICIT_APP_VERSION"
   fi
@@ -193,209 +217,148 @@ load_existing_env() {
   fi
 }
 
-# 删除脚本自身
 delete_self() {
-  echo ""
-  echo "🗑️ 操作已完成，正在清理脚本文件..."
-  SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+  echo
+  echo "Cleaning up script file..."
+  local script_path
+  script_path="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
   sleep 1
-  rm -f "$SCRIPT_PATH" && echo "✅ 脚本文件已删除" || echo "❌ 删除脚本文件失败"
+  rm -f "$script_path" && echo "Script file removed" || echo "Failed to remove script file"
 }
 
-
-
-# 获取用户输入的配置参数
 get_config_params() {
-  echo "🔧 请输入配置参数："
+  echo "Enter deployment parameters:"
 
-  read -p "前端端口（默认 6366）: " FRONTEND_PORT
-  FRONTEND_PORT=${FRONTEND_PORT:-6366}
+  read -r -p "Frontend port (default 6366): " FRONTEND_PORT
+  FRONTEND_PORT="${FRONTEND_PORT:-6366}"
 
-  read -p "后端端口（默认 6365）: " BACKEND_PORT
-  BACKEND_PORT=${BACKEND_PORT:-6365}
+  read -r -p "Backend port (default 6365): " BACKEND_PORT
+  BACKEND_PORT="${BACKEND_PORT:-6365}"
 
-  read -p "发布版本（默认 ${RELEASE_TAG}）: " APP_VERSION_INPUT
-  APP_VERSION=${APP_VERSION_INPUT:-${APP_VERSION:-$RELEASE_TAG}}
-  BACKEND_IMAGE=${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}
-  FRONTEND_IMAGE=${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}
-
-  # 生成JWT密钥
-  JWT_SECRET=$(generate_random)
+  read -r -p "Release tag (default ${RELEASE_TAG}): " APP_VERSION_INPUT
+  APP_VERSION="${APP_VERSION_INPUT:-${APP_VERSION:-$RELEASE_TAG}}"
+  BACKEND_IMAGE="${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}"
+  FRONTEND_IMAGE="${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}"
+  JWT_SECRET="$(generate_random)"
 }
 
-# 安装功能
+write_env_file() {
+  cat > .env <<EOF
+JWT_SECRET=$JWT_SECRET
+FRONTEND_PORT=$FRONTEND_PORT
+BACKEND_PORT=$BACKEND_PORT
+APP_VERSION=$APP_VERSION
+BACKEND_IMAGE=$BACKEND_IMAGE
+FRONTEND_IMAGE=$FRONTEND_IMAGE
+EOF
+}
+
+wait_for_backend_health() {
+  local max_wait=90
+  local i=1
+  while [[ $i -le $max_wait ]]; do
+    if docker ps --format "{{.Names}}" | grep -q "^springboot-backend$"; then
+      local status
+      status="$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo "unknown")"
+      if [[ "$status" == "healthy" || "$status" == "unknown" ]]; then
+        echo "Backend service is up"
+        return 0
+      fi
+      if [[ "$status" == "unhealthy" ]]; then
+        echo "Backend health check failed"
+        return 1
+      fi
+    fi
+    if (( i % 10 == 1 )); then
+      echo "Waiting for backend... (${i}/${max_wait})"
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  echo "Backend start timed out"
+  return 1
+}
+
 install_panel() {
-  echo "🚀 开始安装面板..."
+  echo "Installing panel..."
   check_docker
   load_existing_env
   get_config_params
 
-  echo "🔽 下载必要文件..."
-  DOCKER_COMPOSE_URL=$(get_docker_compose_url)
-  echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
-  if [[ ! -s "docker-compose.yml" ]]; then
-    echo "❌ docker-compose.yml 下载失败，请先在 GitHub 创建 release"
-    exit 1
-  fi
-  echo "✅ 文件准备完成"
+  echo "Downloading required files..."
+  download_compose_file
 
-  # 自动检测并配置 IPv6 支持
   if check_ipv6_support; then
-    echo "🚀 系统支持 IPv6，自动启用 IPv6 配置..."
     configure_docker_ipv6
   fi
 
-  cat > .env <<EOF
-JWT_SECRET=$JWT_SECRET
-FRONTEND_PORT=$FRONTEND_PORT
-BACKEND_PORT=$BACKEND_PORT
-APP_VERSION=$APP_VERSION
-BACKEND_IMAGE=$BACKEND_IMAGE
-FRONTEND_IMAGE=$FRONTEND_IMAGE
-EOF
+  write_env_file
 
-  echo "🚀 启动 docker 服务..."
   $DOCKER_CMD up -d
+  wait_for_backend_health || true
 
-  echo "🎉 部署完成"
-  echo "🌐 访问地址: http://服务器IP:$FRONTEND_PORT"
-  echo "📖 部署完成后请阅读下使用文档，求求了啊，不要上去就是一顿操作"
-  echo "📚 文档地址: https://github.com/${REPO_OWNER}/${REPO_NAME}"
-  echo "💡 默认管理员账号: admin_user / admin_user"
-  echo "⚠️  登录后请立即修改默认密码！"
-
-
+  echo "Install completed"
+  echo "Panel URL: http://SERVER_IP:${FRONTEND_PORT}"
+  echo "Repository: https://github.com/${REPO_OWNER}/${REPO_NAME}"
+  echo "Default admin: admin_user / admin_user"
+  echo "Change the default password after login"
 }
 
-# 更新功能
 update_panel() {
-  echo "🔄 开始更新面板..."
+  echo "Updating panel..."
   check_docker
   load_existing_env
-  APP_VERSION=${APP_VERSION:-$RELEASE_TAG}
-  BACKEND_IMAGE=${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}
-  FRONTEND_IMAGE=${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}
-  FRONTEND_PORT=${FRONTEND_PORT:-6366}
-  BACKEND_PORT=${BACKEND_PORT:-6365}
-  JWT_SECRET=${JWT_SECRET:-$(generate_random)}
+  APP_VERSION="${APP_VERSION:-$RELEASE_TAG}"
+  BACKEND_IMAGE="${BACKEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-backend}"
+  FRONTEND_IMAGE="${FRONTEND_IMAGE:-${IMAGE_NAMESPACE}/${IMAGE_BASENAME}-frontend}"
+  FRONTEND_PORT="${FRONTEND_PORT:-6366}"
+  BACKEND_PORT="${BACKEND_PORT:-6365}"
+  JWT_SECRET="${JWT_SECRET:-$(generate_random)}"
 
-  echo "🔽 下载最新配置文件..."
-  DOCKER_COMPOSE_URL=$(get_docker_compose_url)
-  echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-  curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
-  if [[ ! -s "docker-compose.yml" ]]; then
-    echo "❌ docker-compose.yml 下载失败，请先在 GitHub 创建 release"
-    exit 1
-  fi
-  echo "✅ 下载完成"
+  download_compose_file
+  write_env_file
 
-  cat > .env <<EOF
-JWT_SECRET=$JWT_SECRET
-FRONTEND_PORT=$FRONTEND_PORT
-BACKEND_PORT=$BACKEND_PORT
-APP_VERSION=$APP_VERSION
-BACKEND_IMAGE=$BACKEND_IMAGE
-FRONTEND_IMAGE=$FRONTEND_IMAGE
-EOF
-
-  # 自动检测并配置 IPv6 支持
   if check_ipv6_support; then
-    echo "🚀 系统支持 IPv6，自动启用 IPv6 配置..."
     configure_docker_ipv6
   fi
 
-  # 先发送 SIGTERM 信号，让应用优雅关闭
   docker stop -t 30 springboot-backend 2>/dev/null || true
   docker stop -t 10 vite-frontend 2>/dev/null || true
-  
-  # 等待 WAL 文件同步
-  echo "⏳ 等待数据同步..."
   sleep 5
-  
-  # 然后再完全停止
+
   $DOCKER_CMD down
-
-  echo "⬇️ 拉取最新镜像..."
   $DOCKER_CMD pull
-
-  echo "🚀 启动更新后的服务..."
   $DOCKER_CMD up -d
+  wait_for_backend_health || true
 
-  # 等待服务启动
-  echo "⏳ 等待服务启动..."
-
-  # 检查后端容器健康状态
-  echo "🔍 检查后端服务状态..."
-  for i in {1..90}; do
-    if docker ps --format "{{.Names}}" | grep -q "^springboot-backend$"; then
-      BACKEND_HEALTH=$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo "unknown")
-      if [[ "$BACKEND_HEALTH" == "healthy" ]]; then
-        echo "✅ 后端服务健康检查通过"
-        break
-      elif [[ "$BACKEND_HEALTH" == "starting" ]]; then
-        # 继续等待
-        :
-      elif [[ "$BACKEND_HEALTH" == "unhealthy" ]]; then
-        echo "⚠️ 后端健康状态：$BACKEND_HEALTH"
-      fi
-    else
-      echo "⚠️ 后端容器未找到或未运行"
-      BACKEND_HEALTH="not_running"
-    fi
-    if [ $i -eq 90 ]; then
-      echo "❌ 后端服务启动超时（90秒）"
-      echo "🔍 当前状态：$(docker inspect -f '{{.State.Health.Status}}' springboot-backend 2>/dev/null || echo '容器不存在')"
-      echo "🛑 更新终止"
-      return 1
-    fi
-    # 每15秒显示一次进度
-    if [ $((i % 15)) -eq 1 ]; then
-      echo "⏳ 等待后端服务启动... ($i/90) 状态：${BACKEND_HEALTH:-unknown}"
-    fi
-    sleep 1
-  done
-
-  echo "✅ 更新完成"
+  echo "Update completed"
 }
 
-
-
-# 卸载功能
 uninstall_panel() {
-  echo "🗑️ 开始卸载面板..."
+  echo "Uninstalling panel..."
   check_docker
 
-  if [[ ! -f "docker-compose.yml" ]]; then
-    echo "⚠️ 未找到 docker-compose.yml 文件，正在下载以完成卸载..."
-    DOCKER_COMPOSE_URL=$(get_docker_compose_url)
-    echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
-    curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
-    echo "✅ docker-compose.yml 下载完成"
+  if [[ ! -f docker-compose.yml ]]; then
+    echo "docker-compose.yml is missing, downloading it first..."
+    download_compose_file
   fi
 
-  read -p "确认卸载面板吗？此操作将停止并删除所有容器和数据 (y/N): " confirm
+  read -r -p "Remove panel containers, images and volumes? (y/N): " confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-    echo "❌ 取消卸载"
+    echo "Cancelled"
     return 0
   fi
 
-  echo "🛑 停止并删除容器、镜像、卷..."
-  $DOCKER_CMD down --rmi all --volumes --remove-orphans
-  echo "🧹 删除配置文件..."
+  $DOCKER_CMD down --rmi all --volumes --remove-orphans || true
   rm -f docker-compose.yml .env
-  echo "✅ 卸载完成"
+  echo "Uninstall completed"
 }
 
-# 主逻辑
 main() {
-
-  # 显示交互式菜单
   while true; do
     show_menu
-    read -p "请输入选项 (1-4): " choice
-
-    case $choice in
+    read -r -p "Choose an option (1-4): " choice
+    case "$choice" in
       1)
         install_panel
         delete_self
@@ -412,17 +375,16 @@ main() {
         exit 0
         ;;
       4)
-        echo "👋 退出脚本"
+        echo "Exit"
         delete_self
         exit 0
         ;;
       *)
-        echo "❌ 无效选项，请输入 1-4"
-        echo ""
+        echo "Invalid option, please enter 1-4"
+        echo
         ;;
     esac
   done
 }
 
-# 执行主函数
 main
