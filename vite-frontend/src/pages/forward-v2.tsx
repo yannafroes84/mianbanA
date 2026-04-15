@@ -112,6 +112,7 @@ export default function ForwardPage() {
   const [batchImportText, setBatchImportText] = useState("");
   const [batchImportErrors, setBatchImportErrors] = useState<string[]>([]);
   const [activeGroupRecord, setActiveGroupRecord] = useState<ForwardGroupRecord | null>(null);
+  const [activeGroupName, setActiveGroupName] = useState("");
   const [groupRenameValue, setGroupRenameValue] = useState("");
   const [form, setForm] = useState<ForwardForm>({
     name: "",
@@ -405,27 +406,37 @@ export default function ForwardPage() {
   }
 
   function openRenameGroup(groupName: string) {
+    const name = normalizeGroup(groupName);
     const record = getCustomGroupRecord(groupName);
-    if (!record?.id) return toast.error("只能修改自定义分组");
-    setActiveGroupRecord(record);
-    setGroupRenameValue(getGroupRecordName(record));
+    if (!name) return toast.error("分组不存在");
+    setActiveGroupRecord(record || null);
+    setActiveGroupName(name);
+    setGroupRenameValue(name);
     setGroupRenameModalOpen(true);
   }
 
   async function renameGroup() {
     const record = activeGroupRecord;
-    const oldName = record ? getGroupRecordName(record) : "";
+    const oldName = activeGroupName || (record ? getGroupRecordName(record) : "");
     const newName = normalizeGroup(groupRenameValue);
-    if (!record?.id) return toast.error("分组不存在");
+    if (!oldName) return toast.error("分组不存在");
     if (!newName) return toast.error("请输入分组名称");
     setGroupActionLoading(true);
     try {
-      const res = await updateForwardGroupRecord({ id: record.id, groupName: newName });
-      if (res.code !== 0) throw new Error(res.msg || "rename failed");
+      if (record?.id) {
+        const res = await updateForwardGroupRecord({ id: record.id, groupName: newName });
+        if (res.code !== 0) throw new Error(res.msg || "rename failed");
+      } else {
+        const ids = forwards.filter(item => normalizeGroup(item.groupName) === oldName).map(item => item.id);
+        if (!ids.length) throw new Error("分组内没有转发规则");
+        const res = await batchUpdateForwardGroup({ ids, groupName: newName });
+        if (res.code !== 0) throw new Error(res.msg || "rename failed");
+      }
       if (selectedGroup === oldName) setSelectedGroup(newName);
       toast.success("分组已改名");
       setGroupRenameModalOpen(false);
       setActiveGroupRecord(null);
+      setActiveGroupName("");
       setGroupRenameValue("");
       loadData(false);
     } catch (error: any) {
@@ -436,24 +447,35 @@ export default function ForwardPage() {
   }
 
   function openDeleteGroup(groupName: string) {
+    const name = normalizeGroup(groupName);
     const record = getCustomGroupRecord(groupName);
-    if (!record?.id) return toast.error("只能删除自定义分组");
-    setActiveGroupRecord(record);
+    if (!name) return toast.error("分组不存在");
+    setActiveGroupRecord(record || null);
+    setActiveGroupName(name);
     setGroupDeleteModalOpen(true);
   }
 
   async function deleteGroup() {
     const record = activeGroupRecord;
-    const groupName = record ? getGroupRecordName(record) : "";
-    if (!record?.id) return toast.error("分组不存在");
+    const groupName = activeGroupName || (record ? getGroupRecordName(record) : "");
+    if (!groupName) return toast.error("分组不存在");
     setGroupActionLoading(true);
     try {
-      const res = await deleteForwardGroupRecord(record.id);
-      if (res.code !== 0) throw new Error(res.msg || "delete failed");
+      if (record?.id) {
+        const res = await deleteForwardGroupRecord(record.id);
+        if (res.code !== 0) throw new Error(res.msg || "delete failed");
+      } else {
+        const ids = forwards.filter(item => normalizeGroup(item.groupName) === groupName).map(item => item.id);
+        if (ids.length) {
+          const res = await batchUpdateForwardGroup({ ids, groupName: "" });
+          if (res.code !== 0) throw new Error(res.msg || "delete failed");
+        }
+      }
       if (selectedGroup === groupName) setSelectedGroup("");
       toast.success("分组已删除，规则已移至未分组");
       setGroupDeleteModalOpen(false);
       setActiveGroupRecord(null);
+      setActiveGroupName("");
       loadData(false);
     } catch (error: any) {
       toast.error(error?.message || "删除分组失败");
@@ -774,7 +796,6 @@ export default function ForwardPage() {
       return groupSections.length > 0 ? (
         <div className="space-y-6">
           {groupSections.map(section => {
-            const groupRecord = getCustomGroupRecord(section.name);
             return (
               <Card key={section.key} className="shadow-sm border border-divider overflow-hidden">
                 <CardHeader className="pb-3">
@@ -785,8 +806,8 @@ export default function ForwardPage() {
                     </div>
                     {!section.isUngrouped && (
                       <div className="flex flex-wrap items-center gap-2">
-                        {groupRecord?.id && <Button size="sm" variant="flat" color="default" onPress={() => openRenameGroup(section.name)}>改名</Button>}
-                        {groupRecord?.id && <Button size="sm" variant="flat" color="danger" onPress={() => openDeleteGroup(section.name)}>删除分组</Button>}
+                        <Button size="sm" variant="flat" color="default" onPress={() => openRenameGroup(section.name)}>改名</Button>
+                        <Button size="sm" variant="flat" color="danger" onPress={() => openDeleteGroup(section.name)}>删除分组</Button>
                         <Button size="sm" variant="flat" color="secondary" onPress={() => openBatchImport(section.name)}>批量导入</Button>
                         <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal(section.name)}>+ 新增到此分组</Button>
                       </div>
@@ -956,7 +977,7 @@ export default function ForwardPage() {
             <>
               <ModalHeader>删除分组</ModalHeader>
               <ModalBody>
-                <p>确定删除分组 <b>{activeGroupRecord ? getGroupRecordName(activeGroupRecord) : ""}</b> 吗？</p>
+                <p>确定删除分组 <b>{activeGroupName || (activeGroupRecord ? getGroupRecordName(activeGroupRecord) : "")}</b> 吗？</p>
                 <p className="text-xs text-default-500">分组内的转发规则不会删除，会自动移至未分组。</p>
               </ModalBody>
               <ModalFooter>
