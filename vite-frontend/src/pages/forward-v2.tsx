@@ -46,6 +46,16 @@ interface ForwardForm {
   groupName: string;
 }
 
+interface BatchImportRow {
+  lineNo: number;
+  name: string;
+  tunnelId: number;
+  inPort: number;
+  remoteAddr: string;
+  strategy: string;
+  groupName: string;
+}
+
 interface GroupSection {
   key: string;
   name: string;
@@ -82,13 +92,19 @@ export default function ForwardPage() {
   const [groupCreateModalOpen, setGroupCreateModalOpen] = useState(false);
   const [batchMoveModalOpen, setBatchMoveModalOpen] = useState(false);
   const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchImportModalOpen, setBatchImportModalOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [groupCreateLoading, setGroupCreateLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [batchImportLoading, setBatchImportLoading] = useState(false);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
   const [groupCreateValue, setGroupCreateValue] = useState("");
   const [batchTargetGroup, setBatchTargetGroup] = useState("");
+  const [batchImportTunnelId, setBatchImportTunnelId] = useState<number | null>(null);
+  const [batchImportGroup, setBatchImportGroup] = useState("");
+  const [batchImportText, setBatchImportText] = useState("");
+  const [batchImportErrors, setBatchImportErrors] = useState<string[]>([]);
   const [form, setForm] = useState<ForwardForm>({
     name: "",
     tunnelId: null,
@@ -227,6 +243,15 @@ export default function ForwardPage() {
     setForm({ name: "", tunnelId: null, inPort: null, remoteAddr: "", interfaceName: "", strategy: "fifo", groupName: normalizeGroup(groupName) || (selectedGroup && selectedGroup !== UNGROUPED_KEY ? selectedGroup : "") });
     setErrors({});
     setModalOpen(true);
+  }
+
+  function openBatchImport(groupName = "") {
+    const defaultGroup = normalizeGroup(groupName) || (selectedGroup && selectedGroup !== UNGROUPED_KEY ? selectedGroup : "");
+    const currentTunnelStillExists = batchImportTunnelId && tunnels.some(tunnel => tunnel.id === batchImportTunnelId);
+    setBatchImportTunnelId(currentTunnelStillExists ? batchImportTunnelId : (tunnels.length === 1 ? tunnels[0].id : null));
+    setBatchImportGroup(defaultGroup);
+    setBatchImportErrors([]);
+    setBatchImportModalOpen(true);
   }
 
   function openEditModal(item: Forward) {
@@ -393,6 +418,169 @@ export default function ForwardPage() {
     }
   }
 
+  function splitImportLine(line: string) {
+    const trimmed = line.trim();
+    if (trimmed.includes(",")) {
+      const result: string[] = [];
+      let current = "";
+      let quote = "";
+      for (let i = 0; i < trimmed.length; i += 1) {
+        const char = trimmed[i];
+        if ((char === "\"" || char === "'") && (!quote || quote === char)) {
+          if (quote === char && trimmed[i + 1] === char) {
+            current += char;
+            i += 1;
+          } else {
+            quote = quote ? "" : char;
+          }
+          continue;
+        }
+        if (char === "," && !quote) {
+          result.push(current.trim());
+          current = "";
+          continue;
+        }
+        current += char;
+      }
+      result.push(current.trim());
+      return result;
+    }
+    return trimmed.split(trimmed.includes("\t") ? /\t+/ : /\s+/).map(item => item.trim()).filter(Boolean);
+  }
+
+  function isPortText(value?: string) {
+    if (!value || !/^\d+$/.test(value.trim())) return false;
+    const port = Number(value);
+    return Number.isInteger(port) && port >= 1 && port <= 65535;
+  }
+
+  function isImportHeader(line: string) {
+    const text = line.replace(/\s/g, "").toLowerCase();
+    return (text.includes("name") || text.includes("名称")) && (text.includes("port") || text.includes("端口"));
+  }
+
+  function parseBatchImportRows() {
+    const errors: string[] = [];
+    const rows: BatchImportRow[] = [];
+    const tunnelId = batchImportTunnelId;
+    const defaultGroup = normalizeGroup(batchImportGroup);
+
+    if (!tunnelId) {
+      errors.push("请选择关联隧道");
+    }
+
+    batchImportText.split(/\r?\n/).forEach((rawLine, index) => {
+      const lineNo = index + 1;
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || isImportHeader(line)) return;
+
+      const parts = splitImportLine(line);
+      if (parts.length < 2) {
+        errors.push(`第 ${lineNo} 行格式错误：至少需要入口端口和目标地址`);
+        return;
+      }
+
+      const firstIsPort = isPortText(parts[0]);
+      const name = firstIsPort ? (parts[2] || `转发-${parts[0]}`) : parts[0];
+      const inPortText = firstIsPort ? parts[0] : parts[1];
+      const remoteText = firstIsPort ? parts[1] : parts[2];
+      const groupText = normalizeGroup(parts[3]) || defaultGroup;
+
+      if (!name?.trim()) {
+        errors.push(`第 ${lineNo} 行缺少转发名称`);
+        return;
+      }
+      if (!isPortText(inPortText)) {
+        errors.push(`第 ${lineNo} 行入口端口无效：${inPortText || "空"}`);
+        return;
+      }
+      if (!remoteText?.trim()) {
+        errors.push(`第 ${lineNo} 行缺少目标地址`);
+        return;
+      }
+
+      rows.push({
+        lineNo,
+        name: name.trim(),
+        tunnelId: tunnelId || 0,
+        inPort: Number(inPortText),
+        remoteAddr: remoteText.split(";").map(item => item.trim()).filter(Boolean).join(","),
+        strategy: "fifo",
+        groupName: groupText,
+      });
+    });
+
+    if (!rows.length && !errors.length) {
+      errors.push("请至少输入一条转发规则");
+    }
+
+    return { rows: errors.length ? [] : rows, errors };
+  }
+
+  async function batchImportForwards() {
+    const { rows, errors } = parseBatchImportRows();
+    if (errors.length) {
+      setBatchImportErrors(errors);
+      toast.error(errors[0]);
+      return;
+    }
+
+    setBatchImportLoading(true);
+    setBatchImportErrors([]);
+    const failed: string[] = [];
+    let successCount = 0;
+
+    try {
+      const groups = Array.from(new Set(rows.map(row => row.groupName).filter(Boolean)));
+      for (const groupName of groups) {
+        try { await createForwardGroup({ name: groupName }); } catch { /* ignore */ }
+      }
+      if (groups.length) {
+        setForwardGroups(prev => {
+          const exists = new Set(prev.map(getGroupRecordName));
+          const additions = groups.filter(name => !exists.has(name)).map(name => ({ name, groupName: name }));
+          return additions.length ? [...prev, ...additions] : prev;
+        });
+      }
+
+      for (const row of rows) {
+        const res = await createForward({
+          name: row.name,
+          tunnelId: row.tunnelId,
+          inPort: row.inPort,
+          remoteAddr: row.remoteAddr,
+          strategy: row.strategy,
+          groupName: row.groupName,
+        });
+        if (res.code === 0) {
+          successCount += 1;
+        } else {
+          failed.push(`第 ${row.lineNo} 行：${res.msg || "创建失败"}`);
+        }
+      }
+
+      if (successCount > 0) {
+        await loadData(false);
+      }
+
+      if (failed.length) {
+        setBatchImportErrors(failed);
+        toast.error(`导入完成：成功 ${successCount} 条，失败 ${failed.length} 条`);
+        return;
+      }
+
+      toast.success(`批量导入成功：${successCount} 条`);
+      setBatchImportModalOpen(false);
+      setBatchImportText("");
+      setBatchImportGroup("");
+      setBatchImportErrors([]);
+    } catch {
+      toast.error("批量导入失败");
+    } finally {
+      setBatchImportLoading(false);
+    }
+  }
+
   function groupSelectItems() {
     return [
       { key: ALL_GROUP_KEY, label: "全部分组" },
@@ -447,7 +635,10 @@ export default function ForwardPage() {
                     <p className="text-xs text-default-500">{section.totalCount} 个转发，{section.runningCount} 个运行中</p>
                   </div>
                   {!section.isUngrouped && (
-                    <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal(section.name)}>+ 新增到此分组</Button>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="flat" color="secondary" onPress={() => openBatchImport(section.name)}>批量导入</Button>
+                      <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal(section.name)}>+ 新增到此分组</Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
@@ -459,7 +650,12 @@ export default function ForwardPage() {
                 ) : (
                   <div className="rounded-xl border border-dashed border-divider p-6 text-center">
                     <p className="text-sm text-default-500 mb-3">当前分组还没有转发</p>
-                    {!section.isUngrouped && <Button size="sm" color="primary" variant="flat" onPress={() => openCreateModal(section.name)}>在此分组新增规则</Button>}
+                    {!section.isUngrouped && (
+                      <div className="flex items-center justify-center gap-2">
+                        <Button size="sm" color="secondary" variant="flat" onPress={() => openBatchImport(section.name)}>批量导入到此分组</Button>
+                        <Button size="sm" color="primary" variant="flat" onPress={() => openCreateModal(section.name)}>在此分组新增规则</Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardBody>
@@ -510,6 +706,7 @@ export default function ForwardPage() {
           <div className="flex items-center justify-end gap-2 xl:col-span-3">
             <Button size="sm" variant="flat" color="primary" onPress={() => setGroupCreateModalOpen(true)}>新建分组</Button>
             <Button size="sm" variant="flat" color="default" onPress={() => setViewMode(prev => prev === "grouped" ? "direct" : "grouped")}>{viewMode === "grouped" ? "切到直列" : "切到分组"}</Button>
+            <Button size="sm" variant="flat" color="secondary" onPress={() => openBatchImport()}>批量导入</Button>
             <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal()}>新增</Button>
           </div>
         </div>
@@ -612,6 +809,55 @@ export default function ForwardPage() {
               <ModalFooter>
                 <Button variant="light" onPress={onClose}>取消</Button>
                 <Button color="danger" onPress={batchDelete} isLoading={batchLoading}>删除</Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={batchImportModalOpen} onOpenChange={setBatchImportModalOpen} size="3xl" scrollBehavior="outside" backdrop="blur" placement="center">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>批量导入转发规则</ModalHeader>
+              <ModalBody>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Select label="关联隧道" selectedKeys={batchImportTunnelId ? new Set([String(batchImportTunnelId)]) : new Set()} onSelectionChange={(keys) => { const selected = Array.from(keys)[0] as string; setBatchImportTunnelId(selected ? Number(selected) : null); }}>
+                      {tunnels.map(tunnel => <SelectItem key={String(tunnel.id)}>{tunnel.name}</SelectItem>)}
+                    </Select>
+                    <Autocomplete label="导入分组" placeholder="留空表示未分组" allowsCustomValue selectedKey={batchImportGroup} onSelectionChange={(key) => setBatchImportGroup(String(key || ""))} onInputChange={setBatchImportGroup} defaultItems={groupNames.map(name => ({ key: name, label: name }))}>
+                      {(item: { key: string; label: string }) => <AutocompleteItem key={item.key}>{item.label}</AutocompleteItem>}
+                    </Autocomplete>
+                  </div>
+
+                  <Textarea
+                    label="导入内容"
+                    minRows={10}
+                    placeholder={"每行一条，支持两种格式：\n名称,入口端口,目标地址,分组\n入口端口,目标地址,名称,分组\n\n示例：\n香港-01,22101,1.1.1.1:80,香港\n22102,2.2.2.2:443,香港-02,香港\n# 多个目标可用分号：香港-03,22103,1.1.1.1:80;2.2.2.2:80,香港"}
+                    value={batchImportText}
+                    onChange={(event) => setBatchImportText(event.target.value)}
+                  />
+
+                  <div className="rounded-xl bg-default-50 px-3 py-2 text-xs text-default-600 space-y-1">
+                    <p>说明：分组列可省略，省略时使用上方“导入分组”；目标地址里的多个目标用英文分号分隔。</p>
+                    <p>导入会逐条创建，某一条失败不会阻断后续规则，失败原因会显示在下方。</p>
+                  </div>
+
+                  {batchImportErrors.length > 0 && (
+                    <div className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-2">
+                      <p className="text-sm font-medium text-danger mb-2">导入错误</p>
+                      <div className="max-h-40 overflow-auto space-y-1 text-xs text-danger">
+                        {batchImportErrors.slice(0, 30).map((error, index) => <p key={`${error}-${index}`}>{error}</p>)}
+                        {batchImportErrors.length > 30 && <p>还有 {batchImportErrors.length - 30} 条错误未显示</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>取消</Button>
+                <Button color="primary" onPress={batchImportForwards} isLoading={batchImportLoading}>开始导入</Button>
               </ModalFooter>
             </>
           )}
