@@ -1101,20 +1101,113 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R updateForwardGroup(ForwardGroupUpdateDto forwardGroupUpdateDto) {
+        UserInfo currentUser = getCurrentUserInfo();
+        Forward forward = validateForwardExists(forwardGroupUpdateDto.getId(), currentUser);
+        if (forward == null) {
+            return R.err("转发不存在");
+        }
+
+        String groupName = normalizeGroupName(forwardGroupUpdateDto.getGroupName());
+        forward.setGroupName(groupName);
+        forward.setUpdatedTime(System.currentTimeMillis());
+        this.updateById(forward);
+        ensureCustomGroupExists(forward.getUserId(), groupName);
+        return R.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R batchUpdateForwardGroup(ForwardBatchGroupDto batchGroupDto) {
+        UserInfo currentUser = getCurrentUserInfo();
+        String groupName = normalizeGroupName(batchGroupDto.getGroupName());
+        ensureCustomGroupExists(currentUser.getUserId(), groupName);
+
+        for (Long id : batchGroupDto.getIds()) {
+            Forward forward = validateForwardExists(id, currentUser);
+            if (forward == null) {
+                return R.err("转发不存在或无权限操作");
+            }
+            forward.setGroupName(groupName);
+            forward.setUpdatedTime(System.currentTimeMillis());
+            this.updateById(forward);
+        }
+
+        return R.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R batchDeleteForward(ForwardBatchDeleteDto batchDeleteDto) {
+        boolean forceDelete = Boolean.TRUE.equals(batchDeleteDto.getForceDelete());
+        for (Long id : batchDeleteDto.getIds()) {
+            R result = forceDelete ? forceDeleteForward(id) : deleteForward(id);
+            if (result.getCode() != 0) {
+                throw new RuntimeException(result.getMsg());
+            }
+        }
+        return R.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R createForwardGroup(ForwardGroupCreateDto createDto) {
+        UserInfo currentUser = getCurrentUserInfo();
+        String groupName = normalizeGroupName(createDto.getGroupName());
+        if (groupName.isEmpty()) {
+            return R.err("分组名称不能为空");
+        }
+        ensureCustomGroupExists(currentUser.getUserId(), groupName);
+        return R.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public R deleteForwardGroup(Long id) {
+        UserInfo currentUser = getCurrentUserInfo();
+        ForwardGroup forwardGroup = forwardGroupMapper.selectById(id);
+        if (forwardGroup == null) {
+            return R.err("分组不存在");
+        }
+        if (currentUser.getRoleId() != 0 && !Objects.equals(currentUser.getUserId(), forwardGroup.getUserId())) {
+            return R.err("无权限操作");
+        }
+        forwardGroupMapper.deleteById(id);
+        return R.ok();
+    }
+
+    @Override
     public R getForwardGroups() {
         UserInfo currentUser = getCurrentUserInfo();
-        List<Forward> forwards;
-        if (currentUser.getRoleId() == 0) {
-            forwards = this.list();
-        } else {
-            forwards = this.list(new QueryWrapper<Forward>().eq("user_id", currentUser.getUserId()));
-        }
-        List<String> groups = forwards.stream()
-                .map(Forward::getGroupName)
-                .filter(name -> name != null && !name.isEmpty())
-                .distinct()
+        List<ForwardWithTunnelDto> visibleForwards = loadVisibleForwards(currentUser);
+        Map<String, Long> usedGroupCountMap = buildUsedGroupCountMap(visibleForwards);
+        Map<Integer, String> userNameMap = buildVisibleUserNameMap(visibleForwards);
+
+        List<ForwardGroup> customGroups = listVisibleCustomGroups(currentUser);
+        List<ForwardGroupViewDto> customGroupViews = customGroups.stream()
+                .map(group -> toGroupViewDto(group, userNameMap.get(group.getUserId()), usedGroupCountMap.getOrDefault(groupKey(group.getUserId(), group.getGroupName()), 0L), true))
+                .sorted(Comparator.comparing(ForwardGroupViewDto::getGroupName, Comparator.nullsLast(String::compareToIgnoreCase)))
                 .collect(Collectors.toList());
-        return R.ok(groups);
+
+        List<ForwardGroupViewDto> usedGroupViews = usedGroupCountMap.entrySet().stream()
+                .map(entry -> {
+                    Integer userId = parseUserIdFromGroupKey(entry.getKey());
+                    String groupName = parseGroupNameFromGroupKey(entry.getKey());
+                    return toGroupViewDto(null, userNameMap.get(userId), entry.getValue(), false, userId, groupName);
+                })
+                .sorted(Comparator.comparing(ForwardGroupViewDto::getGroupName, Comparator.nullsLast(String::compareToIgnoreCase)))
+                .collect(Collectors.toList());
+
+        ForwardGroupsResponseDto response = new ForwardGroupsResponseDto();
+        response.setCustomGroups(customGroupViews);
+        response.setUsedGroups(usedGroupViews);
+        response.setGroups(usedGroupViews.stream()
+                .map(ForwardGroupViewDto::getGroupName)
+                .distinct()
+                .sorted(String::compareToIgnoreCase)
+                .collect(Collectors.toList()));
+        return R.ok(response);
     }
 
     // ========== 内部数据类 ==========

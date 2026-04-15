@@ -152,11 +152,21 @@ export default function ForwardPage() {
   const [forwards, setForwards] = useState<Forward[]>([]);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [portFilter, setPortFilter] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [availableGroups, setAvailableGroups] = useState<string[]>([]);
+  const [forwardGroups, setForwardGroups] = useState<ForwardGroupRecord[]>([]);
+  const [selectedForwardIds, setSelectedForwardIds] = useState<number[]>([]);
   const [groupEditForward, setGroupEditForward] = useState<Forward | null>(null);
   const [groupEditValue, setGroupEditValue] = useState('');
   const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [groupCreateModalOpen, setGroupCreateModalOpen] = useState(false);
+  const [groupCreateValue, setGroupCreateValue] = useState('');
+  const [groupCreateLoading, setGroupCreateLoading] = useState(false);
+  const [batchGroupModalOpen, setBatchGroupModalOpen] = useState(false);
+  const [batchTargetGroup, setBatchTargetGroup] = useState('');
+  const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
   
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
@@ -235,6 +245,10 @@ export default function ForwardPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    setSelectedForwardIds(prev => prev.filter(id => forwards.some(forward => forward.id === id)));
+  }, [forwards]);
 
   // 切换显示模式并保存到localStorage
   const handleViewModeChange = () => {
