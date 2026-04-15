@@ -32,6 +32,14 @@ get_source_page_url() {
   echo "https://github.com/${REPO_OWNER}/${REPO_NAME}/tree/$(get_source_ref)"
 }
 
+get_source_archive_url() {
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/main"
+  else
+    echo "https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/tags/${RELEASE_TAG}"
+  fi
+}
+
 RAW_DOCKER_COMPOSEV4_URL="$(build_raw_file_url "docker-compose-v4.yml")"
 RAW_DOCKER_COMPOSEV6_URL="$(build_raw_file_url "docker-compose-v6.yml")"
 DOCKER_COMPOSEV4_URL="$RAW_DOCKER_COMPOSEV4_URL"
@@ -144,6 +152,51 @@ check_docker() {
     exit 1
   fi
   echo "Docker command: ${DOCKER_CMD}"
+}
+
+build_panel_images_from_source() {
+  local temp_dir archive_url source_dir
+  temp_dir="$(mktemp -d)"
+  archive_url="$(get_source_archive_url)"
+  if [[ "$COUNTRY" == "CN" ]]; then
+    archive_url="https://ghfast.top/${archive_url}"
+  fi
+
+  echo "Building panel images from source..."
+  if ! curl -fL --retry 3 --connect-timeout 15 "$archive_url" -o "$temp_dir/repo.tar.gz"; then
+    echo "Error: failed to download repository source"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  if ! tar -xzf "$temp_dir/repo.tar.gz" -C "$temp_dir"; then
+    echo "Error: failed to extract repository source"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  source_dir="$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [[ ! -d "$source_dir/springboot-backend" || ! -d "$source_dir/vite-frontend" ]]; then
+    echo "Error: application source directories not found"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  docker build -t "${BACKEND_IMAGE}:${APP_VERSION}" "$source_dir/springboot-backend"
+  docker build -t "${FRONTEND_IMAGE}:${APP_VERSION}" "$source_dir/vite-frontend"
+
+  rm -rf "$temp_dir"
+  return 0
+}
+
+ensure_panel_images() {
+  echo "Preparing panel images..."
+  if docker pull "${BACKEND_IMAGE}:${APP_VERSION}" && docker pull "${FRONTEND_IMAGE}:${APP_VERSION}"; then
+    return 0
+  fi
+
+  echo "Remote images are not ready, falling back to local source build..."
+  build_panel_images_from_source
 }
 
 configure_docker_ipv6() {
@@ -293,6 +346,7 @@ install_panel() {
   fi
 
   write_env_file
+  ensure_panel_images
 
   $DOCKER_CMD up -d
   wait_for_backend_health || true
@@ -327,7 +381,7 @@ update_panel() {
   sleep 5
 
   $DOCKER_CMD down
-  $DOCKER_CMD pull
+  ensure_panel_images
   $DOCKER_CMD up -d
   wait_for_backend_health || true
 

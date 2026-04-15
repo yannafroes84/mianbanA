@@ -36,6 +36,22 @@ build_download_url() {
   build_release_asset_url "gost-$(get_architecture)"
 }
 
+get_source_ref() {
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "main"
+  else
+    echo "$RELEASE_TAG"
+  fi
+}
+
+get_source_archive_url() {
+  if [[ "$RELEASE_TAG" == "latest" ]]; then
+    echo "https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/main"
+  else
+    echo "https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/tags/${RELEASE_TAG}"
+  fi
+}
+
 RAW_DOWNLOAD_URL="$(build_download_url)"
 DOWNLOAD_URL="$RAW_DOWNLOAD_URL"
 COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
@@ -89,14 +105,98 @@ download_release_asset() {
   return 0
 }
 
+install_go_toolchain() {
+  if command -v go >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local go_version="1.23.4"
+  local go_arch
+  local go_url
+  go_arch="$(get_architecture)"
+  if [[ "$COUNTRY" == "CN" ]]; then
+    go_url="https://golang.google.cn/dl/go${go_version}.linux-${go_arch}.tar.gz"
+  else
+    go_url="https://go.dev/dl/go${go_version}.linux-${go_arch}.tar.gz"
+  fi
+
+  echo "Installing Go toolchain..."
+  if ! curl -fL --retry 3 --connect-timeout 15 "$go_url" -o /tmp/go-toolchain.tar.gz; then
+    echo "Error: failed to download Go toolchain"
+    return 1
+  fi
+
+  rm -rf /usr/local/go
+  if ! tar -C /usr/local -xzf /tmp/go-toolchain.tar.gz; then
+    echo "Error: failed to extract Go toolchain"
+    rm -f /tmp/go-toolchain.tar.gz
+    return 1
+  fi
+  rm -f /tmp/go-toolchain.tar.gz
+  export PATH="/usr/local/go/bin:$PATH"
+  return 0
+}
+
+build_flux_agent_from_source() {
+  local output_path="$1"
+  local temp_dir archive_url source_dir arch
+
+  temp_dir="$(mktemp -d)"
+  archive_url="$(get_source_archive_url)"
+  if [[ "$COUNTRY" == "CN" ]]; then
+    archive_url="https://ghfast.top/${archive_url}"
+  fi
+
+  echo "Release asset not ready, building from source..."
+  if ! install_go_toolchain; then
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  if ! curl -fL --retry 3 --connect-timeout 15 "$archive_url" -o "$temp_dir/repo.tar.gz"; then
+    echo "Error: failed to download repository source"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  if ! tar -xzf "$temp_dir/repo.tar.gz" -C "$temp_dir"; then
+    echo "Error: failed to extract repository source"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  source_dir="$(find "$temp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  if [[ ! -d "$source_dir/go-gost" ]]; then
+    echo "Error: go-gost source directory not found"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  arch="$(get_architecture)"
+  export PATH="/usr/local/go/bin:$PATH"
+  if ! (cd "$source_dir/go-gost" && GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$output_path" .); then
+    echo "Error: failed to build flux_agent from source"
+    rm -rf "$temp_dir"
+    return 1
+  fi
+
+  rm -rf "$temp_dir"
+  chmod +x "$output_path"
+  return 0
+}
+
 download_flux_agent_binary() {
   local output_path="$1"
   local asset_name="gost-$(get_architecture)"
 
   echo "Download URL: $DOWNLOAD_URL"
-  assert_release_asset_exists "$RAW_DOWNLOAD_URL" "$asset_name" || return 1
-  download_release_asset "$DOWNLOAD_URL" "$output_path" "$asset_name" || return 1
-  chmod +x "$output_path"
+  if assert_release_asset_exists "$RAW_DOWNLOAD_URL" "$asset_name" && download_release_asset "$DOWNLOAD_URL" "$output_path" "$asset_name"; then
+    chmod +x "$output_path"
+  else
+    if ! build_flux_agent_from_source "$output_path"; then
+      return 1
+    fi
+  fi
 
   if ! "$output_path" -V >/dev/null 2>&1; then
     echo "Error: downloaded file cannot be executed: ${output_path}"
