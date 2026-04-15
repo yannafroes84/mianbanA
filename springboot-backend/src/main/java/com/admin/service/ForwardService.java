@@ -93,6 +93,8 @@ public interface ForwardService extends IService<Forward> {
 
     R deleteForwardGroup(Long id);
 
+    R renameForwardGroup(ForwardGroupUpdateDto forwardGroupUpdateDto);
+
     R createForwardGroup(ForwardGroupCreateDto createDto);
 
     R getForwardGroupList();

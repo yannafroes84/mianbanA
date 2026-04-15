@@ -9,8 +9,8 @@ import { Chip } from "@heroui/chip";
 import { Spinner } from "@heroui/spinner";
 import { Switch } from "@heroui/switch";
 import toast from "react-hot-toast";
-import { createForward, deleteForward, forceDeleteForward, getForwardGroups, getForwardList, pauseForwardService, resumeForwardService, updateForward, updateForwardGroup, userTunnel } from "@/api";
-import { batchDeleteForwards, batchUpdateForwardGroup, createForwardGroup, getForwardGroupList, type ForwardGroupRecord } from "@/api/forward-groups";
+import { createForward, deleteForward, diagnoseForward, forceDeleteForward, getForwardGroups, getForwardList, pauseForwardService, resumeForwardService, updateForward, updateForwardGroup, userTunnel } from "@/api";
+import { batchDeleteForwards, batchUpdateForwardGroup, createForwardGroup, deleteForwardGroupRecord, getForwardGroupList, updateForwardGroupRecord, type ForwardGroupRecord } from "@/api/forward-groups";
 
 interface Forward {
   id: number;
@@ -27,6 +27,8 @@ interface Forward {
   userId?: number;
   userName?: string;
   groupName?: string;
+  inFlow?: number;
+  outFlow?: number;
 }
 
 interface Tunnel {
@@ -93,11 +95,15 @@ export default function ForwardPage() {
   const [batchMoveModalOpen, setBatchMoveModalOpen] = useState(false);
   const [batchDeleteModalOpen, setBatchDeleteModalOpen] = useState(false);
   const [batchImportModalOpen, setBatchImportModalOpen] = useState(false);
+  const [groupRenameModalOpen, setGroupRenameModalOpen] = useState(false);
+  const [groupDeleteModalOpen, setGroupDeleteModalOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [groupCreateLoading, setGroupCreateLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchImportLoading, setBatchImportLoading] = useState(false);
+  const [groupActionLoading, setGroupActionLoading] = useState(false);
+  const [diagnosingIds, setDiagnosingIds] = useState<number[]>([]);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
   const [groupCreateValue, setGroupCreateValue] = useState("");
   const [batchTargetGroup, setBatchTargetGroup] = useState("");
@@ -105,6 +111,8 @@ export default function ForwardPage() {
   const [batchImportGroup, setBatchImportGroup] = useState("");
   const [batchImportText, setBatchImportText] = useState("");
   const [batchImportErrors, setBatchImportErrors] = useState<string[]>([]);
+  const [activeGroupRecord, setActiveGroupRecord] = useState<ForwardGroupRecord | null>(null);
+  const [groupRenameValue, setGroupRenameValue] = useState("");
   const [form, setForm] = useState<ForwardForm>({
     name: "",
     tunnelId: null,
@@ -180,6 +188,43 @@ export default function ForwardPage() {
   const isSelected = (id: number) => selectedIds.includes(id);
   const toggleSelected = (id: number) => setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   const clearSelection = () => setSelectedIds([]);
+  const getCustomGroupRecord = (name: string) => forwardGroups.find(item => getGroupRecordName(item) === name && item.id);
+
+  function formatFlow(value?: number) {
+    const bytes = Number(value || 0);
+    if (!bytes) return "0 B";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+
+  function getStrategyLabel(strategy?: string) {
+    if (strategy === "round") return "轮询";
+    if (strategy === "random") return "随机";
+    if (strategy === "hash") return "哈希";
+    return "主备";
+  }
+
+  function getAddressList(value?: string) {
+    return (value || "").split(",").map(item => item.trim()).filter(Boolean);
+  }
+
+  function getEntryAddresses(item: Forward) {
+    const addresses = getAddressList(item.inIp);
+    if (addresses.length) return addresses;
+    return item.inPort ? [`:${item.inPort}`] : [];
+  }
+
+  async function copyText(value: string, label: string) {
+    if (!value || value === "-") return;
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`${label}已复制`);
+    } catch {
+      toast.error("复制失败");
+    }
+  }
 
   async function loadData(preserveLoading = true) {
     setLoading(preserveLoading);
@@ -359,6 +404,64 @@ export default function ForwardPage() {
     }
   }
 
+  function openRenameGroup(groupName: string) {
+    const record = getCustomGroupRecord(groupName);
+    if (!record?.id) return toast.error("只能修改自定义分组");
+    setActiveGroupRecord(record);
+    setGroupRenameValue(getGroupRecordName(record));
+    setGroupRenameModalOpen(true);
+  }
+
+  async function renameGroup() {
+    const record = activeGroupRecord;
+    const oldName = record ? getGroupRecordName(record) : "";
+    const newName = normalizeGroup(groupRenameValue);
+    if (!record?.id) return toast.error("分组不存在");
+    if (!newName) return toast.error("请输入分组名称");
+    setGroupActionLoading(true);
+    try {
+      const res = await updateForwardGroupRecord({ id: record.id, groupName: newName });
+      if (res.code !== 0) throw new Error(res.msg || "rename failed");
+      if (selectedGroup === oldName) setSelectedGroup(newName);
+      toast.success("分组已改名");
+      setGroupRenameModalOpen(false);
+      setActiveGroupRecord(null);
+      setGroupRenameValue("");
+      loadData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "分组改名失败");
+    } finally {
+      setGroupActionLoading(false);
+    }
+  }
+
+  function openDeleteGroup(groupName: string) {
+    const record = getCustomGroupRecord(groupName);
+    if (!record?.id) return toast.error("只能删除自定义分组");
+    setActiveGroupRecord(record);
+    setGroupDeleteModalOpen(true);
+  }
+
+  async function deleteGroup() {
+    const record = activeGroupRecord;
+    const groupName = record ? getGroupRecordName(record) : "";
+    if (!record?.id) return toast.error("分组不存在");
+    setGroupActionLoading(true);
+    try {
+      const res = await deleteForwardGroupRecord(record.id);
+      if (res.code !== 0) throw new Error(res.msg || "delete failed");
+      if (selectedGroup === groupName) setSelectedGroup("");
+      toast.success("分组已删除，规则已移至未分组");
+      setGroupDeleteModalOpen(false);
+      setActiveGroupRecord(null);
+      loadData(false);
+    } catch (error: any) {
+      toast.error(error?.message || "删除分组失败");
+    } finally {
+      setGroupActionLoading(false);
+    }
+  }
+
   async function batchMoveGroup() {
     const ids = selectedIds.filter(id => id > 0);
     const groupName = normalizeGroup(batchTargetGroup);
@@ -415,6 +518,25 @@ export default function ForwardPage() {
       }
     } finally {
       setBatchLoading(false);
+    }
+  }
+
+  async function runDiagnosis(item: Forward) {
+    setDiagnosingIds(prev => prev.includes(item.id) ? prev : [...prev, item.id]);
+    try {
+      const res = await diagnoseForward(item.id);
+      if (res.code !== 0) throw new Error(res.msg || "诊断失败");
+      const results = Array.isArray(res.data?.results) ? res.data.results : [];
+      const failedCount = results.filter((result: any) => result && result.success === false).length;
+      if (failedCount > 0) {
+        toast.error(`诊断完成，发现 ${failedCount} 项异常`);
+      } else {
+        toast.success("诊断正常");
+      }
+    } catch (error: any) {
+      toast.error(error?.message || "诊断失败");
+    } finally {
+      setDiagnosingIds(prev => prev.filter(id => id !== item.id));
     }
   }
 
@@ -590,30 +712,55 @@ export default function ForwardPage() {
   }
 
   function renderCard(item: Forward) {
+    const entryAddresses = getEntryAddresses(item);
+    const entryMain = entryAddresses[0] || "-";
+    const entryExtra = entryAddresses.length > 1 ? ` (+${entryAddresses.length - 1}个)` : "";
+    const targetMain = getAddressList(item.remoteAddr)[0] || item.remoteAddr || "-";
+    const isDiagnosing = diagnosingIds.includes(item.id);
+
     return (
-      <Card key={item.id} className={`shadow-sm border transition-shadow duration-200 ${isSelected(item.id) ? "border-primary ring-2 ring-primary/20" : "border-divider hover:shadow-md"}`}>
-        <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-3 w-full">
-            <div className="flex items-start gap-2 flex-1 min-w-0">
-              <input type="checkbox" className="mt-1 h-4 w-4" checked={isSelected(item.id)} onChange={() => toggleSelected(item.id)} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 min-w-0">
-                  <h3 className="font-semibold text-foreground truncate text-sm">{item.name}</h3>
-                  {item.groupName && <Chip size="sm" variant="flat" color="secondary">{item.groupName}</Chip>}
+      <Card key={item.id} className={`shadow-sm border rounded-xl transition-shadow duration-200 ${isSelected(item.id) ? "border-primary ring-2 ring-primary/20" : "border-divider hover:shadow-md"}`}>
+        <CardBody className="p-3">
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <input type="checkbox" className="mt-1 h-4 w-4 shrink-0" checked={isSelected(item.id)} onChange={() => toggleSelected(item.id)} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="font-semibold text-foreground truncate text-sm">{item.name}</h3>
+                    {item.serviceRunning && <Chip size="sm" color="success" variant="flat">正常</Chip>}
+                  </div>
+                  <p className="text-xs text-default-500 truncate">{item.groupName || "未分组"}</p>
                 </div>
-                <p className="text-xs text-default-500 truncate">{item.tunnelName}</p>
+              </div>
+              <Switch size="sm" isSelected={item.serviceRunning} onValueChange={() => toggleService(item)} isDisabled={item.status !== 0 && item.status !== 1} />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2 rounded-md border border-divider bg-default-50 px-2 py-1.5 text-xs">
+                <span className="min-w-0 truncate">
+                  <span className="text-default-500">入口：</span>
+                  <span className="font-mono text-foreground">{entryMain}</span>
+                  {entryExtra && <span className="ml-1 text-default-500">{entryExtra}</span>}
+                </span>
+                <Button size="sm" variant="light" className="h-5 min-w-0 px-1 text-default-400" onPress={() => copyText(entryAddresses.join("\n"), "入口")}>复制</Button>
+              </div>
+              <div className="rounded-md border border-divider bg-default-50 px-2 py-1.5 text-xs truncate">
+                <span className="text-default-500">目标：</span>
+                <span className="font-mono text-foreground">{targetMain}</span>
+                {getAddressList(item.remoteAddr).length > 1 && <span className="ml-1 text-default-500">(+{getAddressList(item.remoteAddr).length - 1}个)</span>}
               </div>
             </div>
-            <Switch size="sm" isSelected={item.serviceRunning} onValueChange={() => toggleService(item)} isDisabled={item.status !== 0 && item.status !== 1} />
-          </div>
-        </CardHeader>
-        <CardBody className="pt-0 pb-3">
-          <div className="space-y-2">
-            <div className="rounded-lg bg-default-50 px-2 py-1 text-xs">入口：{item.inIp}:{item.inPort}</div>
-            <div className="rounded-lg bg-default-50 px-2 py-1 text-xs break-all">目标：{item.remoteAddr}</div>
-            <div className="flex gap-2 pt-2">
-              <Button size="sm" variant="flat" color="primary" className="flex-1" onPress={() => openEditModal(item)}>编辑</Button>
-              <Button size="sm" variant="flat" color="warning" className="flex-1" onPress={() => openCreateModal(item.groupName || "")}>同组新增</Button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip size="sm" color="primary" variant="flat">{getStrategyLabel(item.strategy)}</Chip>
+              <Chip size="sm" color="secondary" variant="flat">上行 {formatFlow(item.inFlow)}</Chip>
+              <Chip size="sm" color="success" variant="flat">下行 {formatFlow(item.outFlow)}</Chip>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-1">
+              <Button size="sm" variant="flat" color="primary" className="min-w-0" onPress={() => openEditModal(item)}>编辑</Button>
+              <Button size="sm" variant="flat" color="warning" className="min-w-0" onPress={() => runDiagnosis(item)} isLoading={isDiagnosing}>诊断</Button>
               <Button size="sm" variant="flat" color="danger" className="flex-1" onPress={() => handleDelete(item)}>删除</Button>
             </div>
           </div>
@@ -626,41 +773,46 @@ export default function ForwardPage() {
     if (viewMode === "grouped") {
       return groupSections.length > 0 ? (
         <div className="space-y-6">
-          {groupSections.map(section => (
-            <Card key={section.key} className="shadow-sm border border-divider overflow-hidden">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between gap-3 w-full">
-                  <div className="min-w-0">
-                    <h2 className="text-base font-semibold truncate">{section.name}</h2>
-                    <p className="text-xs text-default-500">{section.totalCount} 个转发，{section.runningCount} 个运行中</p>
-                  </div>
-                  {!section.isUngrouped && (
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="flat" color="secondary" onPress={() => openBatchImport(section.name)}>批量导入</Button>
-                      <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal(section.name)}>+ 新增到此分组</Button>
+          {groupSections.map(section => {
+            const groupRecord = getCustomGroupRecord(section.name);
+            return (
+              <Card key={section.key} className="shadow-sm border border-divider overflow-hidden">
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 w-full">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-semibold truncate">{section.name}</h2>
+                      <p className="text-xs text-default-500">{section.totalCount} 个转发，{section.runningCount} 个运行中</p>
                     </div>
-                  )}
-                </div>
-              </CardHeader>
-              <CardBody className="pt-0">
-                {section.forwards.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                    {section.forwards.map(renderCard)}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-divider p-6 text-center">
-                    <p className="text-sm text-default-500 mb-3">当前分组还没有转发</p>
                     {!section.isUngrouped && (
-                      <div className="flex items-center justify-center gap-2">
-                        <Button size="sm" color="secondary" variant="flat" onPress={() => openBatchImport(section.name)}>批量导入到此分组</Button>
-                        <Button size="sm" color="primary" variant="flat" onPress={() => openCreateModal(section.name)}>在此分组新增规则</Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {groupRecord?.id && <Button size="sm" variant="flat" color="default" onPress={() => openRenameGroup(section.name)}>改名</Button>}
+                        {groupRecord?.id && <Button size="sm" variant="flat" color="danger" onPress={() => openDeleteGroup(section.name)}>删除分组</Button>}
+                        <Button size="sm" variant="flat" color="secondary" onPress={() => openBatchImport(section.name)}>批量导入</Button>
+                        <Button size="sm" variant="flat" color="primary" onPress={() => openCreateModal(section.name)}>+ 新增到此分组</Button>
                       </div>
                     )}
                   </div>
-                )}
-              </CardBody>
-            </Card>
-          ))}
+                </CardHeader>
+                <CardBody className="pt-0">
+                  {section.forwards.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                      {section.forwards.map(renderCard)}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-divider p-6 text-center">
+                      <p className="text-sm text-default-500 mb-3">当前分组还没有转发</p>
+                      {!section.isUngrouped && (
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <Button size="sm" color="secondary" variant="flat" onPress={() => openBatchImport(section.name)}>批量导入到此分组</Button>
+                          <Button size="sm" color="primary" variant="flat" onPress={() => openCreateModal(section.name)}>在此分组新增规则</Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+            );
+          })}
         </div>
       ) : (
         <Card className="shadow-sm border border-divider">
@@ -774,6 +926,42 @@ export default function ForwardPage() {
               <ModalFooter>
                 <Button variant="light" onPress={onClose}>取消</Button>
                 <Button color="primary" onPress={createGroup} isLoading={groupCreateLoading}>创建</Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={groupRenameModalOpen} onOpenChange={setGroupRenameModalOpen} size="md">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>分组改名</ModalHeader>
+              <ModalBody>
+                <Input label="新分组名称" value={groupRenameValue} onValueChange={setGroupRenameValue} />
+                <p className="text-xs text-default-500">改名后，该分组内现有转发规则会同步切换到新分组名。</p>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>取消</Button>
+                <Button color="primary" onPress={renameGroup} isLoading={groupActionLoading}>保存</Button>
+              </ModalFooter>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={groupDeleteModalOpen} onOpenChange={setGroupDeleteModalOpen} size="md">
+        <ModalContent>
+          {(onClose) => (
+            <>
+              <ModalHeader>删除分组</ModalHeader>
+              <ModalBody>
+                <p>确定删除分组 <b>{activeGroupRecord ? getGroupRecordName(activeGroupRecord) : ""}</b> 吗？</p>
+                <p className="text-xs text-default-500">分组内的转发规则不会删除，会自动移至未分组。</p>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="light" onPress={onClose}>取消</Button>
+                <Button color="danger" onPress={deleteGroup} isLoading={groupActionLoading}>删除分组</Button>
               </ModalFooter>
             </>
           )}

@@ -1158,6 +1158,49 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public R renameForwardGroup(ForwardGroupUpdateDto forwardGroupUpdateDto) {
+        UserInfo currentUser = getCurrentUserInfo();
+        ForwardGroup forwardGroup = forwardGroupMapper.selectById(forwardGroupUpdateDto.getId());
+        if (forwardGroup == null) {
+            return R.err("分组不存在");
+        }
+        if (currentUser.getRoleId() != 0 && !Objects.equals(currentUser.getUserId(), forwardGroup.getUserId())) {
+            return R.err("无权操作该分组");
+        }
+
+        String oldGroupName = normalizeGroupName(forwardGroup.getGroupName());
+        String newGroupName = normalizeGroupName(forwardGroupUpdateDto.getGroupName());
+        if (newGroupName.isEmpty()) {
+            return R.err("分组名称不能为空");
+        }
+        if (Objects.equals(oldGroupName, newGroupName)) {
+            return R.ok();
+        }
+
+        long now = System.currentTimeMillis();
+        ForwardGroup duplicate = forwardGroupMapper.selectOne(new QueryWrapper<ForwardGroup>()
+                .eq("user_id", forwardGroup.getUserId())
+                .eq("group_name", newGroupName)
+                .ne("id", forwardGroup.getId())
+                .last("limit 1"));
+        if (duplicate != null) {
+            forwardGroupMapper.deleteById(forwardGroup.getId());
+        } else {
+            forwardGroup.setGroupName(newGroupName);
+            forwardGroup.setUpdatedTime(now);
+            forwardGroupMapper.updateById(forwardGroup);
+        }
+
+        this.update(new UpdateWrapper<Forward>()
+                .eq("user_id", forwardGroup.getUserId())
+                .eq("group_name", oldGroupName)
+                .set("group_name", newGroupName)
+                .set("updated_time", now));
+        return R.ok();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public R deleteForwardGroup(Long id) {
         UserInfo currentUser = getCurrentUserInfo();
         ForwardGroup forwardGroup = forwardGroupMapper.selectById(id);
@@ -1166,6 +1209,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         if (currentUser.getRoleId() != 0 && !Objects.equals(currentUser.getUserId(), forwardGroup.getUserId())) {
             return R.err("闂傚倸鍊风粈渚€骞栭锕€鐤柣妤€鐗婇崣蹇涙⒒閸喍绶遍柣鎺嶇矙閺屾盯顢曢悩鎻掑闂佹娊鏀卞Λ鍐蓟閻斿吋鐒介柨鏇楀亾妤犵偞顨婇弻鐔碱敍濞戞碍鍣ч梻?" );
+        }
+        String groupName = normalizeGroupName(forwardGroup.getGroupName());
+        if (!groupName.isEmpty()) {
+            this.update(new UpdateWrapper<Forward>()
+                    .eq("user_id", forwardGroup.getUserId())
+                    .eq("group_name", groupName)
+                    .set("group_name", "")
+                    .set("updated_time", System.currentTimeMillis()));
         }
         forwardGroupMapper.deleteById(id);
         return R.ok();
