@@ -9,6 +9,20 @@ INSTALL_DIR="/etc/flux_agent"
 BIN_DIR="/usr/local/bin"
 BIN_PATH="${BIN_DIR}/flux_agent"
 
+ensure_root() {
+  if [[ $EUID -eq 0 ]]; then
+    return 0
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    echo "Root permission is required, re-running with sudo..."
+    exec sudo -E bash "$0" "$@"
+  fi
+
+  echo "Error: root permission is required. Please run this command as root or install sudo."
+  exit 1
+}
+
 get_architecture() {
   case "$(uname -m)" in
     x86_64) echo "amd64" ;;
@@ -55,11 +69,16 @@ get_source_archive_url() {
 }
 
 RAW_DOWNLOAD_URL="$(build_download_url)"
-DOWNLOAD_URL="$RAW_DOWNLOAD_URL"
 COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
-if [[ "$COUNTRY" == "CN" ]]; then
-  DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
-fi
+
+append_candidate_url() {
+  local -n target_array="$1"
+  local raw_url="$2"
+  target_array+=("$raw_url")
+  if [[ "$COUNTRY" == "CN" ]]; then
+    target_array+=("https://ghfast.top/${raw_url}")
+  fi
+}
 
 print_release_asset_error() {
   local asset_name="$1"
@@ -97,7 +116,7 @@ download_release_asset() {
     return 1
   fi
 
-  if grep -aqE '^(Not Found|404: Not Found)$|^<html|^<!DOCTYPE html' "$output_path"; then
+  if head -c 512 "$output_path" | grep -aqE '^(Not Found|404: Not Found)$|^<html|^<!DOCTYPE html'; then
     echo "Error: downloaded content is not a valid binary: ${asset_name}"
     print_release_asset_error "$asset_name"
     rm -f "$output_path"
@@ -145,9 +164,6 @@ build_flux_agent_from_source() {
 
   temp_dir="$(mktemp -d)"
   archive_url="$(get_source_archive_url)"
-  if [[ "$COUNTRY" == "CN" ]]; then
-    archive_url="https://ghfast.top/${archive_url}"
-  fi
 
   echo "Release asset not ready, building from source..."
   if ! install_go_toolchain; then
@@ -155,7 +171,19 @@ build_flux_agent_from_source() {
     return 1
   fi
 
-  if ! curl -fL --retry 3 --connect-timeout 15 "$archive_url" -o "$temp_dir/repo.tar.gz"; then
+  local archive_urls=()
+  local url
+  append_candidate_url archive_urls "$archive_url"
+
+  for url in "${archive_urls[@]}"; do
+    echo "Source URL: $url"
+    if curl -fL --retry 3 --connect-timeout 15 "$url" -o "$temp_dir/repo.tar.gz"; then
+      break
+    fi
+    rm -f "$temp_dir/repo.tar.gz"
+  done
+
+  if [[ ! -s "$temp_dir/repo.tar.gz" ]]; then
     echo "Error: failed to download repository source"
     rm -rf "$temp_dir"
     return 1
@@ -190,14 +218,22 @@ build_flux_agent_from_source() {
 download_flux_agent_binary() {
   local output_path="$1"
   local asset_name="gost-$(get_architecture)"
+  local download_urls=()
+  local url
 
-  echo "Download URL: $DOWNLOAD_URL"
-  if assert_release_asset_exists "$RAW_DOWNLOAD_URL" "$asset_name" && download_release_asset "$DOWNLOAD_URL" "$output_path" "$asset_name"; then
-    chmod +x "$output_path"
-  else
-    if ! build_flux_agent_from_source "$output_path"; then
-      return 1
+  append_candidate_url download_urls "$RAW_DOWNLOAD_URL"
+  if assert_release_asset_exists "$RAW_DOWNLOAD_URL" "$asset_name"; then
+    for url in "${download_urls[@]}"; do
+      echo "Download URL: $url"
+      if download_release_asset "$url" "$output_path" "$asset_name"; then
+        chmod +x "$output_path"
+        return 0
+      fi
     fi
+  fi
+
+  if ! build_flux_agent_from_source "$output_path"; then
+    return 1
   fi
 
   return 0
@@ -430,6 +466,8 @@ uninstall_flux_agent() {
 }
 
 main() {
+  ensure_root "$@"
+
   if [[ -n "${SERVER_ADDR:-}" && -n "${SECRET:-}" ]]; then
     install_flux_agent
     delete_self
