@@ -11,6 +11,7 @@ import com.admin.mapper.ForwardMapper;
 import com.admin.service.*;
 import com.alibaba.fastjson.JSONArray;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.alibaba.fastjson.JSONObject;
 import lombok.Data;
@@ -1078,7 +1079,6 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
 
 
 
-    @Override
     public R updateForwardGroup(Long id, String groupName) {
         UserInfo currentUser = getCurrentUserInfo();
         Forward forward = this.getById(id);
@@ -1169,6 +1169,24 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         forwardGroupMapper.deleteById(id);
         return R.ok();
+    }
+
+    @Override
+    public R getForwardGroupList() {
+        UserInfo currentUser = getCurrentUserInfo();
+        List<ForwardWithTunnelDto> visibleForwards = loadVisibleForwards(currentUser);
+        Map<String, Long> usedGroupCountMap = buildUsedGroupCountMap(visibleForwards);
+        Map<Integer, String> userNameMap = buildVisibleUserNameMap(visibleForwards);
+
+        List<ForwardGroupViewDto> customGroupViews = listVisibleCustomGroups(currentUser).stream()
+                .map(group -> toGroupViewDto(
+                        group,
+                        userNameMap.get(group.getUserId()),
+                        usedGroupCountMap.getOrDefault(groupKey(group.getUserId(), group.getGroupName()), 0L),
+                        true))
+                .sorted(Comparator.comparing(ForwardGroupViewDto::getGroupName, Comparator.nullsLast(String::compareToIgnoreCase)))
+                .collect(Collectors.toList());
+        return R.ok(customGroupViews);
     }
 
     @Override
