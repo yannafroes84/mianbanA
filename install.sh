@@ -6,6 +6,8 @@ REPO_OWNER="${REPO_OWNER:-yannafroes84}"
 REPO_NAME="${REPO_NAME:-mianbanA}"
 RELEASE_TAG="${RELEASE_TAG:-latest}"
 INSTALL_DIR="/etc/flux_agent"
+BIN_DIR="/usr/local/bin"
+BIN_PATH="${BIN_DIR}/flux_agent"
 
 get_architecture() {
   case "$(uname -m)" in
@@ -320,6 +322,7 @@ install_flux_agent() {
   check_and_install_tcpkill
 
   mkdir -p "$INSTALL_DIR"
+  mkdir -p "$BIN_DIR"
 
   if systemctl list-units --full -all | grep -Fq "flux_agent.service"; then
     echo "Existing flux_agent service detected"
@@ -327,15 +330,16 @@ install_flux_agent() {
     systemctl disable flux_agent 2>/dev/null || true
   fi
 
+  rm -f "$BIN_PATH"
   rm -f "$INSTALL_DIR/flux_agent"
 
   echo "Downloading flux_agent..."
-  if ! download_flux_agent_binary "$INSTALL_DIR/flux_agent"; then
+  if ! download_flux_agent_binary "$BIN_PATH"; then
     echo "Download failed. Check that the release/tag has been published correctly."
     exit 1
   fi
 
-  echo "Version: $("$INSTALL_DIR/flux_agent" -V)"
+  echo "Version: $("$BIN_PATH" -V)"
 
   cat > "$INSTALL_DIR/config.json" <<EOF
 {
@@ -359,7 +363,7 @@ After=network.target
 
 [Service]
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/flux_agent
+ExecStart=$BIN_PATH
 Restart=on-failure
 
 [Install]
@@ -391,7 +395,7 @@ update_flux_agent() {
   check_and_install_tcpkill
 
   echo "Downloading latest version..."
-  if ! download_flux_agent_binary "$INSTALL_DIR/flux_agent.new"; then
+  if ! download_flux_agent_binary "${BIN_PATH}.new"; then
     echo "Download failed. Check that the release/tag has been published correctly."
     return 1
   fi
@@ -400,9 +404,9 @@ update_flux_agent() {
     systemctl stop flux_agent || true
   fi
 
-  mv "$INSTALL_DIR/flux_agent.new" "$INSTALL_DIR/flux_agent"
-  chmod +x "$INSTALL_DIR/flux_agent"
-  echo "Version: $("$INSTALL_DIR/flux_agent" -V)"
+  mv "${BIN_PATH}.new" "$BIN_PATH"
+  chmod +x "$BIN_PATH"
+  echo "Version: $("$BIN_PATH" -V)"
 
   systemctl start flux_agent
   echo "Update completed"
@@ -422,6 +426,9 @@ uninstall_flux_agent() {
   fi
 
   rm -f /etc/systemd/system/flux_agent.service
+  rm -f "$BIN_PATH"
+  rm -f "${BIN_PATH}.new"
+  rm -f "$INSTALL_DIR/flux_agent"
   rm -rf "$INSTALL_DIR"
   systemctl daemon-reload
 
