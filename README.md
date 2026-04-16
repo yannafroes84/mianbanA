@@ -30,21 +30,21 @@
 #### 快速部署
 面板端(稳定版)：
 ```bash
-curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh?ts=$(date +%s)" -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh?ts=$(date +%s)" -o panel_install.sh && chmod +x panel_install.sh && bash ./panel_install.sh
 ```
 节点端(稳定版)：
 ```bash
-curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)" -o install.sh && chmod +x install.sh && ./install.sh
+curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)" -o install.sh && chmod +x install.sh && bash ./install.sh
 
 ```
 
 面板端(指定 release 版本)：
 ```bash
-curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh?ts=$(date +%s)" -o panel_install.sh && chmod +x panel_install.sh && RELEASE_TAG=v2.0.8 ./panel_install.sh
+curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/panel_install.sh?ts=$(date +%s)" -o panel_install.sh && chmod +x panel_install.sh && RELEASE_TAG=v2.0.8 bash ./panel_install.sh
 ```
 节点端(指定 release 版本)：
 ```bash
-curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)" -o install.sh && chmod +x install.sh && RELEASE_TAG=v2.0.8 ./install.sh
+curl -L "https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)" -o install.sh && chmod +x install.sh && RELEASE_TAG=v2.0.8 bash ./install.sh
 
 ```
 

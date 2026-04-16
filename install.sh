@@ -1,5 +1,13 @@
 #!/bin/bash
 
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash "$0" "$@"
+  fi
+  echo "Error: bash is required to run install.sh"
+  exit 1
+fi
+
 set -u
 
 REPO_OWNER="${REPO_OWNER:-yannafroes84}"
@@ -72,13 +80,18 @@ RAW_DOWNLOAD_URL="$(build_download_url)"
 COUNTRY="$(curl -fsSL https://ipinfo.io/country 2>/dev/null || true)"
 
 append_candidate_url() {
-  local -n target_array="$1"
+  local target_array="$1"
   local raw_url="$2"
+  local index
+
   if [[ "$COUNTRY" == "CN" ]]; then
-    target_array+=("https://ghfast.top/${raw_url}")
-    target_array+=("$raw_url")
+    eval "index=\${#$target_array[@]}"
+    printf -v "${target_array}[${index}]" '%s' "https://ghfast.top/${raw_url}"
+    eval "index=\${#$target_array[@]}"
+    printf -v "${target_array}[${index}]" '%s' "$raw_url"
   else
-    target_array+=("$raw_url")
+    eval "index=\${#$target_array[@]}"
+    printf -v "${target_array}[${index}]" '%s' "$raw_url"
   fi
 }
 

@@ -132,7 +132,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         command.append("curl -L \"https://raw.githubusercontent.com/yannafroes84/mianbanA/main/install.sh?ts=$(date +%s)\"")
                 .append(" -o ./install.sh && chmod +x ./install.sh && ");
         String processedServerAddr = GostUtil.processServerAddress(viteConfig.getValue());
-        command.append("./install.sh")
+        command.append("bash ./install.sh")
                 .append(" -a ").append(processedServerAddr)  // 服务器地址
                 .append(" -s ").append(node.getSecret());    // 节点密钥
         return R.ok(command);
